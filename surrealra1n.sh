@@ -338,7 +338,7 @@ require_dir() {
 
 echo "Checking for updates..."
 rm -rf update/latest.txt
-curl -L -o update/latest.txt https://github.com/pwnerblu/surrealra1n/raw/refs/heads/development/update/latest.txt
+curl -L -o update/latest.txt https://github.com/sthomsonpl/surrealra1n/raw/refs/heads/development/update/latest.txt
 LATEST_VERSION=$(head -n 1 "update/latest.txt" | tr -d '\r\n')
 RELEASE_NOTES=$(awk '/^RELEASE NOTES:/{flag=1; next} flag' "update/latest.txt")
 
@@ -353,7 +353,7 @@ if [[ $LATEST_VERSION != $CURRENT_VERSION ]]; then
         rm -rf "updatefiles"
         mkdir updatefiles
         rm -rf "updatefiles/repo"
-        git clone --branch development https://github.com/pwnerblu/surrealra1n updatefiles/repo --recursive
+        git clone --branch development https://github.com/sthomsonpl/surrealra1n updatefiles/repo --recursive
         if [[ ! -d updatefiles/repo ]]; then
             echo "Failed to clone repository."
             exit 1
@@ -1076,7 +1076,7 @@ if [[ $misc_utils_options == 1 ]]; then
     read -p "Are you sure you want to reinstall surrealra1n? (y/N): " surrealra1n_reinstall
     if [[ $surrealra1n_reinstall == Y || $surrealra1n_reinstall == y ]]; then
         sudo rm -rf ./*
-        git clone --branch development https://github.com/pwnerblu/surrealra1n repo --recursive
+        git clone --branch development https://github.com/sthomsonpl/surrealra1n repo --recursive
         if [[ ! -d repo ]]; then
             echo "Failed to clone repository. You will need to fetch surrealra1n from releases on GitHub"
             exit 1
@@ -1229,7 +1229,7 @@ fi
 switch_to_main(){
 
 echo "Fetching latest stable version info..."
-curl -L -o update/latest_main.txt https://github.com/pwnerblu/surrealra1n/raw/refs/heads/main/update/latest.txt
+curl -L -o update/latest_main.txt https://github.com/sthomsonpl/surrealra1n/raw/refs/heads/main/update/latest.txt
 MAIN_VERSION=$(head -n 1 "update/latest_main.txt" | tr -d '\r\n')
 
 CURRENT_CLEAN=$(echo "$CURRENT_VERSION" | sed 's/ beta//g' | sed 's/ .*//g' | tr -d 'v')
@@ -1267,7 +1267,7 @@ if [[ "$CURRENT_MAJOR" -gt "$MAIN_MAJOR" ]] || \
     read -p "Are you sure you want to switch to stable? (y/N): " switch_confirm
     if [[ $switch_confirm == Y || $switch_confirm == y ]]; then
         sudo rm -rf ./*
-        git clone --branch main https://github.com/pwnerblu/surrealra1n repo --recursive
+        git clone --branch main https://github.com/sthomsonpl/surrealra1n repo --recursive
         if [[ ! -d repo ]]; then
             echo "Failed to clone repository."
             exit 1
@@ -1297,7 +1297,7 @@ else
         mv -v futurerestore surrealra1n.old/
         mv -v keys surrealra1n.old/
         mv -v surrealra1n.sh surrealra1n.old/
-        git clone --branch main https://github.com/pwnerblu/surrealra1n repo --recursive
+        git clone --branch main https://github.com/sthomsonpl/surrealra1n repo --recursive
         if [[ ! -d repo ]]; then
             echo "Failed to clone repository."
             exit 1
