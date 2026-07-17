@@ -1,6 +1,6 @@
 # surrealra1n 
 
-A tethered downgrade tool for some A7/A8(X) devices, all A11 devices and most A12/A13 devices, excluding A12(X/Z).
+A tethered downgrade tool for some A7/A8(X) devices, all A11 devices and A12/A13 iPhones.
 
 Supports macOS and Linux
 
@@ -27,7 +27,6 @@ libimobiledevice team, tihmstar, LukeeGD/LukeZGD, xerub, plooshi, etc! (for the 
 Mineek - iPhone X restored patcher, used for ipx restores 14.3-15.6.1 (my fork of the patcher is used for seprmvr64 restores on A8+), openra1n, and seprmvr64
 
 Nathan (verygenericname) - SSHRD_Script
-
 
 
 

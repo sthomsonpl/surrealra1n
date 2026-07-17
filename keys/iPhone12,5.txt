@@ -1,4 +1,4 @@
-# Firmware Keys are sourced from the Apple Wiki
+# iPhone 11 Pro Max firmware keys sourced from the Apple Wiki
 
 ibss-15.6.1: c77b9da475e1eeb93c4af1f1c0913f5f937e83a09495129e31d5a8ee5a022d054ecf431e4ab166cb52b709939fd68fb5
 
