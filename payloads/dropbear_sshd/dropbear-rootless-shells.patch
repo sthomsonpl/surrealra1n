@@ -1,0 +1,48 @@
+--- dropbear-2020.81/svr-auth.c
++++ dropbear-2020.81-rootless/svr-auth.c
+@@ -34,6 +34,10 @@
+ #include "ssh.h"
+ #include "packet.h"
+ #include "auth.h"
++
++extern char *ie_getusershell(void);
++extern void ie_setusershell(void);
++extern void ie_endusershell(void);
+ #include "runopts.h"
+ #include "dbrandom.h"
+ 
+@@ -316,8 +320,8 @@
+ 	/* check the shell is valid. If /etc/shells doesn't exist, getusershell()
+ 	 * should return some standard shells like "/bin/sh" and "/bin/csh" (this
+ 	 * is platform-specific) */
+-	setusershell();
+-	while ((listshell = getusershell()) != NULL) {
++	ie_setusershell();
++	while ((listshell = ie_getusershell()) != NULL) {
+ 		TRACE(("test shell is '%s'", listshell))
+ 		if (strcmp(listshell, usershell) == 0) {
+ 			/* have a match */
+@@ -325,7 +329,7 @@
+ 		}
+ 	}
+ 	/* no matching shell */
+-	endusershell();
++	ie_endusershell();
+ 	TRACE(("no matching shell"))
+ 	ses.authstate.checkusername_failed = 1;
+ 	dropbear_log(LOG_WARNING, "User '%s' has invalid shell, rejected",
+@@ -333,7 +337,7 @@
+ 	return DROPBEAR_FAILURE;
+ 	
+ goodshell:
+-	endusershell();
++	ie_endusershell();
+ 	TRACE(("matching shell"))
+ 
+ 	TRACE(("uid = %d", ses.authstate.pw_uid))
+--- /dev/null
++++ dropbear-2020.81-rootless/localoptions.h
+@@ -0,0 +1,3 @@
++#define DEFAULT_PATH \
++    "/var/jb/usr/local/sbin:/var/jb/usr/local/bin:/var/jb/usr/sbin:" \
++    "/var/jb/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin"

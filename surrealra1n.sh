@@ -23,6 +23,8 @@ outdated=""
 
 set -euo pipefail
 
+source "$SCRIPT_DIR/modules/ssv/main.sh"
+
 error_handler() {
     local exit_code=$?
     local failed_command="$BASH_COMMAND"
@@ -1083,16 +1085,17 @@ echo "Options:"
 echo ""
 echo "1. Reinstall surrealra1n"
 echo "2. Clear all created boot files and restore files"
+echo "3. Clear downloaded files and caches"
 if [[ -d "surrealra1n.old" ]]; then
-    echo "3. Go back to previous version of surrealra1n"
-    echo "4. Back"
+    echo "4. Go back to previous version of surrealra1n"
+    echo "5. Back"
 else
-    echo "3. Back"
+    echo "4. Back"
 fi
 if [[ -d "surrealra1n.old" ]]; then
-    read -p "Please input an option (1-4): " misc_utils_options
+    read -p "Please input an option (1-5): " misc_utils_options
 else
-    read -p "Please input an option (1-3): " misc_utils_options
+    read -p "Please input an option (1-4): " misc_utils_options
 fi
 if [[ $misc_utils_options == 1 ]]; then
     echo "WARNING: All of your boot files, and other things will be deleted (if any files are in the surrealra1n directory, they will be erased), and surrealra1n will be fresh installed."
@@ -1127,7 +1130,34 @@ elif [[ $misc_utils_options == 2 ]]; then
         echo "Clearing boot files/restore files has been canceled"
         misc_utils
     fi
-elif [[ $misc_utils_options == 3 ]] && [[ -d "surrealra1n.old" ]]; then
+elif [[ $misc_utils_options == 3 ]]; then
+    echo "WARNING: Downloaded tools, caches and temporary files will be deleted."
+    read -p "Are you sure you want to continue? (y/N): " clear_downloads
+    if [[ $clear_downloads == y || $clear_downloads == Y ]]; then
+        find bin -mindepth 1 -maxdepth 1 \
+            ! -name notice.txt \
+            -exec rm -rf {} +
+        find futurerestore -mindepth 1 -maxdepth 1 \
+            ! -name notice.txt -exec rm -rf {} +
+        rm -rf tmp tmp1 tmp2 work
+        rm -rf payloads/dropbear_sshd/.cache
+        rm -rf payloads/dropbear_sshd/__pycache__
+        rm -rf payloads/dropbear_sshd/rootfs
+        rm -f payloads/dropbear_sshd/payload-manifest.txt
+        rm -f activate.sh backup.sh
+        rm -f ibootpatch.c main.c
+        rm -rf asr64_patcher iBootpatch2 Kernel64Patcher
+        rm -rf lib libimg4_patcher repo restored_external64patcher
+        rm -rf shsh
+        rm -f known_hosts
+        rm -rf knownhosts
+        echo "Downloaded files and caches have been cleared."
+        echo "Required tools will be downloaded on the next run."
+        exit 0
+    else
+        misc_utils
+    fi
+elif [[ $misc_utils_options == 4 ]] && [[ -d "surrealra1n.old" ]]; then
     old_version=$(cat surrealra1n.old/oldversion.txt)
     if [[ "$old_version" == *beta* ]]; then
         echo "Rollback feature is not supported if you update from a beta."
@@ -1154,7 +1184,7 @@ elif [[ $misc_utils_options == 3 ]] && [[ -d "surrealra1n.old" ]]; then
         echo "Rollback has been canceled."
         misc_utils
     fi
-elif [[ $misc_utils_options == 3 ]] || [[ $misc_utils_options == 4 ]]; then
+elif [[ $misc_utils_options == 4 ]] || [[ $misc_utils_options == 5 ]]; then
     main_menu
 else
     echo "Invalid option. Exiting."
@@ -1395,6 +1425,7 @@ reset_restore_vars() {
     VERSION=""
     BUILD=""
     VERSION_LATEST=""
+    ssv_reset_options
 }
 
 sep_checker(){
@@ -1921,6 +1952,7 @@ rm -rf "work"
 make_custom_ipsw_a12_ios14(){
 
 IBSS_KEY=$(grep "ibss-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
+rm -rf tmp1 tmp2 work
 mkdir -p restorefiles
 mkdir -p restorefiles/$IDENTIFIER
 mkdir -p restorefiles/$IDENTIFIER/$VERSION
@@ -2023,6 +2055,7 @@ rm -rf tmp2/$KERNEL
 ./bin/kerneldiff work/kernel.raw work/kernel.patch work/kernel.diff
 ./bin/img4 -i tmp1/$KERNEL -o tmp2/$KERNEL -T krnl -J -P work/kernel.diff || true
 ./bin/img4 -i $restore_ramdisk_dmg -o work/ramdisk.raw
+ssv_prepare_restore_ramdisk
 ./bin/hfsplus work/ramdisk.raw extract usr/sbin/asr work/asr
 ./bin/asr64_patcher work/asr work/asr_patched
 ./bin/ldid -e work/asr > work/ents.plist
@@ -2063,21 +2096,26 @@ if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12* ]] && [[ $IDENTIFIER 
     ./bin/hfsplus work/ramdisk.raw add work/restored_patch usr/local/bin/$restored
     ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/local/bin/$restored
 fi
+ssv_install_restore_components
 if [[ $VERSION == 15.* ]]; then
     ./bin/img4 -i tmp1/Firmware/$ramdisk_dmg_name.trustcache -o work/trustcache.raw
     ./bin/trustcache append work/trustcache.raw work/restored_patch
     ./bin/trustcache append work/trustcache.raw work/asr_patched
     ./bin/trustcache append work/trustcache.raw work/libimg4.patch
-    ./bin/img4 -i work/trustcache.raw -o tmp2/Firmware/$ramdisk_dmg_name_18.trustcache -A -T rtsc
 fi
+ssv_patch_restore_trustcache
+ssv_patch_static_trustcache
+# Use a separate experimental SSV IPSW.
+ssv_set_custom_ipsw_name
 # pack rdsk into im4p
 ./bin/img4 -i work/ramdisk.raw -o $restore_ramdisk_dmg_18 -A -T rdsk
 cd tmp2
-zip -0 -r ../custom.ipsw *
+zip -0 -r "../$CUSTOM_IPSW_NAME" *
 cd ..
 rm -rf "tmp1"
 rm -rf "tmp2"
-mv -v custom.ipsw $restoredir/custom.ipsw
+mv -v "$CUSTOM_IPSW_NAME" "$restoredir/$CUSTOM_IPSW_NAME"
+ssv_finish_ipsw_build
 rm -rf "work"
 
 }
@@ -2511,17 +2549,7 @@ det_rsep_flag
 
 restoredir="restorefiles/$IDENTIFIER/$VERSION"
 
-if [[ ! -f "$restoredir/custom.ipsw" ]]; then
-    echo "Restore files does not exist, making new ones"
-    make_custom_ipsw_a12_ios14
-else
-    echo "Restore files already exist"
-    read -p "Would you like to make new ones? (y/n): " restorefiles_remake
-    if [[ $restorefiles_remake == Y || $restorefiles_remake == y ]]; then
-        rm -rf "$restoredir"
-        make_custom_ipsw_a12_ios14
-    fi
-fi
+ssv_prepare_restore_artifacts
 curl -L -o bin/liter8ctl https://github.com/prdgmshift/usbliter8/raw/refs/heads/main/usbliter8ctl
 python3 bin/liter8ctl boot boot/$IDENTIFIER/iBSS.patch
 sleep 6
@@ -2539,10 +2567,17 @@ if [[ -z "$SHSH_PATH" ]]; then
     echo "No SHSH file found in the shsh folder. Aborting"
     exit 1
 fi
+FUTURERESTORE_LOG="$restoredir/futurerestore-last.log"
 while true; do
     set +e
-    sudo ./futurerestore/futurerestore -t $SHSH_PATH $rsep_flag --latest-sep $updatebb_flag $restoredir/custom.ipsw
-    EXIT_CODE=$?
+    sudo ./futurerestore/futurerestore -t "$SHSH_PATH" $rsep_flag --latest-sep \
+        $updatebb_flag "$restoredir/$CUSTOM_IPSW_NAME" 2>&1 | tee "$FUTURERESTORE_LOG"
+    EXIT_CODE=${PIPESTATUS[0]}
+    if grep -Eq 'Done: restoring failed!|ERROR: Unable to successfully restore device|what=ERROR: Unable to restore device' \
+        "$FUTURERESTORE_LOG"; then
+        echo "[!] futurerestore reported a restore failure despite exit code $EXIT_CODE."
+        EXIT_CODE=1
+    fi
     set -e
     if [[ $EXIT_CODE -eq 139 ]]; then
         echo "futurerestore segfaulted (exit 139), retrying..."
@@ -2552,9 +2587,11 @@ while true; do
     fi
 done
 if [[ $EXIT_CODE -eq 0 ]]; then
+    ssv_handle_restore_success
     echo "Restore has completed! Read above if there are any errors"
     exit 0
 else
+    ssv_handle_restore_failure "$FUTURERESTORE_LOG"
     echo "futurerestore failed with exit code $EXIT_CODE"
     exit 1
 fi
@@ -2810,8 +2847,9 @@ echo ""
 echo "1. Select Target IPSW"
 echo "2. Select Base IPSW"
 echo "3. Start Restore"
-echo "4. Back"
-read -p "Please input an option (1-4): " tether_options
+ssv_print_menu_options
+echo "6. Back"
+read -p "Please input an option (1-6): " tether_options
 if [[ $tether_options == 1 ]]; then
     IPSW_PATH=$($zenity --file-selection --title="Select an IPSW file")
     if [[ -z "$IPSW_PATH" ]]; then
@@ -2858,6 +2896,12 @@ elif [[ $tether_options == 3 ]]; then
         do_tethered_restore
     fi
 elif [[ $tether_options == 4 ]]; then
+    ssv_select_menu_option "$tether_options"
+    restore_tethered_opts
+elif [[ $tether_options == 5 ]]; then
+    ssv_select_menu_option "$tether_options"
+    restore_tethered_opts
+elif [[ $tether_options == 6 ]]; then
     reset_restore_vars
     restore_utils
 else
