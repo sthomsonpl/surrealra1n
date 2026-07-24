@@ -1,11 +1,94 @@
 #!/bin/bash
 
-SKIP_SETUP_DEV=${SKIP_SETUP_DEV:-0}
-SSHD_DEV=${SSHD_DEV:-0}
+SSV_CONFIG_PATH=${SSV_CONFIG_PATH:-boot/ssv_config.json}
+SSV_PATCHED=0
+SSV_CONFIG_SKIP_SETUP=0
+SSV_CONFIG_SSHD=0
+SKIP_SETUP_DEV=0
+SSHD_DEV=0
 
 ssv_reset_options() {
-    SKIP_SETUP_DEV=0
-    SSHD_DEV=0
+    ssv_apply_config
+}
+
+ssv_apply_config() {
+    if [[ $SSV_PATCHED -eq 1 ]]; then
+        SKIP_SETUP_DEV=$SSV_CONFIG_SKIP_SETUP
+        SSHD_DEV=$SSV_CONFIG_SSHD
+    else
+        SKIP_SETUP_DEV=0
+        SSHD_DEV=0
+    fi
+}
+
+ssv_write_config() {
+    local config_directory
+    config_directory=$(dirname "$SSV_CONFIG_PATH")
+    mkdir -p "$config_directory"
+    python3 - "$SSV_CONFIG_PATH" "$SSV_PATCHED" \
+        "$SSV_CONFIG_SKIP_SETUP" "$SSV_CONFIG_SSHD" <<'PY'
+import json
+import os
+import sys
+
+path, patched, skip_setup, sshd = sys.argv[1:]
+config = {
+    "schema_version": 1,
+    "ssv_patched": patched == "1",
+    "patches": {
+        "skip_setup": skip_setup == "1",
+        "dropbear_sshd": sshd == "1",
+    },
+}
+temporary = f"{path}.surrealra1n"
+with open(temporary, "w", encoding="utf-8") as output:
+    json.dump(config, output, indent=2, sort_keys=True)
+    output.write("\n")
+    output.flush()
+    os.fsync(output.fileno())
+os.replace(temporary, path)
+PY
+}
+
+ssv_load_config() {
+    local loaded_config
+
+    if [[ ! -f "$SSV_CONFIG_PATH" ]]; then
+        ssv_apply_config
+        ssv_write_config
+        return
+    fi
+
+    if ! loaded_config=$(python3 - "$SSV_CONFIG_PATH" 2>/dev/null <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as source:
+    config = json.load(source)
+
+if config.get("schema_version") != 1:
+    raise ValueError("unsupported schema_version")
+
+patched = config.get("ssv_patched")
+patches = config.get("patches")
+if not isinstance(patched, bool) or not isinstance(patches, dict):
+    raise ValueError("invalid SSV configuration")
+
+skip_setup = patches.get("skip_setup")
+sshd = patches.get("dropbear_sshd")
+if not isinstance(skip_setup, bool) or not isinstance(sshd, bool):
+    raise ValueError("invalid patch configuration")
+
+print(int(patched), int(skip_setup), int(sshd))
+PY
+    ); then
+        echo "[!] Invalid SSV configuration in $SSV_CONFIG_PATH; all SSV patches are disabled."
+        ssv_apply_config
+        return
+    fi
+
+    read -r SSV_PATCHED SSV_CONFIG_SKIP_SETUP SSV_CONFIG_SSHD <<< "$loaded_config"
+    ssv_apply_config
 }
 
 ssv_deployment_target() {
@@ -18,24 +101,67 @@ ssv_deployment_target() {
 }
 
 ssv_print_menu_options() {
-    if [[ $SKIP_SETUP_DEV -eq 1 ]]; then
-        echo "4. Experimental SSV Skip Setup (A13 tested; activation required) [ON]"
+    if [[ $SSV_PATCHED -eq 1 ]]; then
+        echo "4. SSV Patched [ON]"
     else
-        echo "4. Experimental SSV Skip Setup (A13 tested; activation required) [OFF]"
+        echo "4. SSV Patched [OFF]"
     fi
-    if [[ $SSHD_DEV -eq 1 ]]; then
-        echo "5. Experimental SSV SSH patches (A13 tested) [ON]"
-    else
-        echo "5. Experimental SSV SSH patches (A13 tested) [OFF]"
-    fi
+    echo "5. SSV Config"
 }
 
 ssv_select_menu_option() {
     case "$1" in
-        4) ssv_toggle_skip_setup ;;
-        5) ssv_toggle_ssh ;;
+        4) ssv_toggle_patched ;;
+        5) ssv_config_menu ;;
         *) return 1 ;;
     esac
+}
+
+ssv_toggle_patched() {
+    if [[ $SSV_PATCHED -eq 1 ]]; then
+        SSV_PATCHED=0
+        echo "[*] SSV patches: OFF"
+    else
+        SSV_PATCHED=1
+        echo "[*] SSV patches: ON"
+    fi
+    ssv_apply_config
+    ssv_write_config
+    read -p "Press enter to continue"
+}
+
+ssv_config_menu() {
+    local ssv_config_option
+    while true; do
+        clear
+        echo "SSV Configuration:"
+        echo ""
+        if [[ $SSV_PATCHED -eq 0 ]]; then
+            echo "SSV Patched is OFF. These settings are saved but currently inactive."
+            echo ""
+        fi
+        if [[ $SSV_CONFIG_SKIP_SETUP -eq 1 ]]; then
+            echo "1. Skip Setup (A13 tested; activation required) [ON]"
+        else
+            echo "1. Skip Setup (A13 tested; activation required) [OFF]"
+        fi
+        if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
+            echo "2. SSH patches (A13 tested) [ON]"
+        else
+            echo "2. SSH patches (A13 tested) [OFF]"
+        fi
+        echo "3. Back"
+        read -p "Please input an option (1-3): " ssv_config_option
+        case "$ssv_config_option" in
+            1) ssv_toggle_skip_setup ;;
+            2) ssv_toggle_ssh ;;
+            3) return ;;
+            *)
+                echo "Invalid option."
+                read -p "Press enter to continue"
+                ;;
+        esac
+    done
 }
 
 ssv_set_custom_ipsw_name() {
@@ -308,25 +434,27 @@ PY
 )
 
 ssv_toggle_skip_setup(){
-    if [[ $SKIP_SETUP_DEV -eq 1 ]]; then
-        SKIP_SETUP_DEV=0
+    if [[ $SSV_CONFIG_SKIP_SETUP -eq 1 ]]; then
+        SSV_CONFIG_SKIP_SETUP=0
         echo "[*] Experimental Skip Setup: OFF"
     else
-        SKIP_SETUP_DEV=1
+        SSV_CONFIG_SKIP_SETUP=1
         echo "[*] Experimental Skip Setup: ON"
         echo "[!] This patch was tested only on A13."
         echo "[!] Device and iOS compatibility is not guaranteed."
         echo "[!] This does not bypass activation."
     fi
+    ssv_apply_config
+    ssv_write_config
     read -p "Press enter to continue"
 }
 
 ssv_toggle_ssh(){
-    if [[ $SSHD_DEV -eq 1 ]]; then
-        SSHD_DEV=0
+    if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
+        SSV_CONFIG_SSHD=0
         echo "[*] Experimental SSV SSH patches: OFF"
     else
-        SSHD_DEV=1
+        SSV_CONFIG_SSHD=1
         echo "[*] Experimental SSV SSH patches: ON"
         echo "[!] This patch was tested only on A13."
         echo "[!] Device and iOS compatibility is not guaranteed."
@@ -335,6 +463,8 @@ ssv_toggle_ssh(){
         echo "[!] Development credentials enabled: root / alpine"
         echo "[*] USB access after boot: ./bin/iproxy 2222 22"
     fi
+    ssv_apply_config
+    ssv_write_config
     read -p "Press enter to continue"
 }
 

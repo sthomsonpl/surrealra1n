@@ -276,6 +276,8 @@ elif [[ "$DISTRO" == "unknown" ]]; then
     exit 1
 fi
 
+ssv_load_config
+
 #
 stat_size() {
     if stat -c %s "$1" >/dev/null 2>&1; then
