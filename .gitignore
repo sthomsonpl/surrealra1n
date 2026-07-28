@@ -1,6 +1,6 @@
 bin/*
 !bin/notice.txt
-/.DS_Store
+.DS_Store
 /activate.sh
 /asr64_patcher/
 /backup.sh
@@ -31,3 +31,8 @@ bin/*
 /payloads/dropbear_sshd/__pycache__/
 /payloads/dropbear_sshd/rootfs/
 /payloads/dropbear_sshd/payload-manifest.txt
+__pycache__/
+*.py[cod]
+/custom_binpatcher/patches.json
+/custom_binpatcher/patches/*.json
+!/custom_binpatcher/patches/template_patch.json

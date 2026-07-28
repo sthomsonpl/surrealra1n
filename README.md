@@ -18,7 +18,12 @@ git clone -b development https://github.com/pwnerblu/surrealra1n
 ```
 Extract the zip file and open a terminal window to the folder that contains surrealra1n, then launch it using the command: ```./surrealra1n.sh```.
 
+# Custom Binpatches
 
+Custom binary patches can be configured from the SSV Config menu. See the
+[Custom Binpatcher documentation](custom_binpatcher/README.md) for the patch
+format, version selectors, template, safety checks, and two-pass restore
+workflow.
 
 # Thanks to:
 
@@ -27,7 +32,6 @@ libimobiledevice team, tihmstar, LukeeGD/LukeZGD, xerub, plooshi, etc! (for the 
 Mineek - iPhone X restored patcher, used for ipx restores 14.3-15.6.1 (my fork of the patcher is used for seprmvr64 restores on A8+), openra1n, and seprmvr64
 
 Nathan (verygenericname) - SSHRD_Script
-
 
 
 

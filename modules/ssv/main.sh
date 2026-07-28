@@ -4,8 +4,13 @@ SSV_CONFIG_PATH=${SSV_CONFIG_PATH:-boot/ssv_config.json}
 SSV_PATCHED=0
 SSV_CONFIG_SKIP_SETUP=0
 SSV_CONFIG_SSHD=0
+SSV_CONFIG_CUSTOM_BINPATCHES=0
 SKIP_SETUP_DEV=0
 SSHD_DEV=0
+CUSTOM_BINPATCHES_DEV=0
+CUSTOM_BINPATCHER_DIR=${CUSTOM_BINPATCHER_DIR:-"$SCRIPT_DIR/custom_binpatcher"}
+CUSTOM_BINPATCHER_CONFIG=${CUSTOM_BINPATCHER_CONFIG:-"$CUSTOM_BINPATCHER_DIR/patches.json"}
+CUSTOM_BINPATCHER_PATCH_DIR=${CUSTOM_BINPATCHER_PATCH_DIR:-"$CUSTOM_BINPATCHER_DIR/patches"}
 
 ssv_reset_options() {
     ssv_apply_config
@@ -15,9 +20,11 @@ ssv_apply_config() {
     if [[ $SSV_PATCHED -eq 1 ]]; then
         SKIP_SETUP_DEV=$SSV_CONFIG_SKIP_SETUP
         SSHD_DEV=$SSV_CONFIG_SSHD
+        CUSTOM_BINPATCHES_DEV=$SSV_CONFIG_CUSTOM_BINPATCHES
     else
         SKIP_SETUP_DEV=0
         SSHD_DEV=0
+        CUSTOM_BINPATCHES_DEV=0
     fi
 }
 
@@ -26,18 +33,20 @@ ssv_write_config() {
     config_directory=$(dirname "$SSV_CONFIG_PATH")
     mkdir -p "$config_directory"
     python3 - "$SSV_CONFIG_PATH" "$SSV_PATCHED" \
-        "$SSV_CONFIG_SKIP_SETUP" "$SSV_CONFIG_SSHD" <<'PY'
+        "$SSV_CONFIG_SKIP_SETUP" "$SSV_CONFIG_SSHD" \
+        "$SSV_CONFIG_CUSTOM_BINPATCHES" <<'PY'
 import json
 import os
 import sys
 
-path, patched, skip_setup, sshd = sys.argv[1:]
+path, patched, skip_setup, sshd, custom_binpatches = sys.argv[1:]
 config = {
     "schema_version": 1,
     "ssv_patched": patched == "1",
     "patches": {
         "skip_setup": skip_setup == "1",
         "dropbear_sshd": sshd == "1",
+        "custom_binpatches": custom_binpatches == "1",
     },
 }
 temporary = f"{path}.surrealra1n"
@@ -76,10 +85,15 @@ if not isinstance(patched, bool) or not isinstance(patches, dict):
 
 skip_setup = patches.get("skip_setup")
 sshd = patches.get("dropbear_sshd")
-if not isinstance(skip_setup, bool) or not isinstance(sshd, bool):
+custom_binpatches = patches.get("custom_binpatches", False)
+if (
+    not isinstance(skip_setup, bool)
+    or not isinstance(sshd, bool)
+    or not isinstance(custom_binpatches, bool)
+):
     raise ValueError("invalid patch configuration")
 
-print(int(patched), int(skip_setup), int(sshd))
+print(int(patched), int(skip_setup), int(sshd), int(custom_binpatches))
 PY
     ); then
         echo "[!] Invalid SSV configuration in $SSV_CONFIG_PATH; all SSV patches are disabled."
@@ -87,7 +101,8 @@ PY
         return
     fi
 
-    read -r SSV_PATCHED SSV_CONFIG_SKIP_SETUP SSV_CONFIG_SSHD <<< "$loaded_config"
+    read -r SSV_PATCHED SSV_CONFIG_SKIP_SETUP SSV_CONFIG_SSHD \
+        SSV_CONFIG_CUSTOM_BINPATCHES <<< "$loaded_config"
     ssv_apply_config
 }
 
@@ -150,12 +165,20 @@ ssv_config_menu() {
         else
             echo "2. SSH patches (A13 tested) [OFF]"
         fi
-        echo "3. Back"
-        read -p "Please input an option (1-3): " ssv_config_option
+        if [[ $SSV_CONFIG_CUSTOM_BINPATCHES -eq 1 ]]; then
+            echo "3. Custom Binpatches [ON]"
+        else
+            echo "3. Custom Binpatches [OFF]"
+        fi
+        echo "4. Custom Binpatches Configurator"
+        echo "5. Back"
+        read -p "Please input an option (1-5, or C): " ssv_config_option
         case "$ssv_config_option" in
             1) ssv_toggle_skip_setup ;;
             2) ssv_toggle_ssh ;;
-            3) return ;;
+            3) ssv_toggle_custom_binpatches ;;
+            4|C|c) ssv_custom_binpatches_configurator ;;
+            5) return ;;
             *)
                 echo "Invalid option."
                 read -p "Press enter to continue"
@@ -165,39 +188,133 @@ ssv_config_menu() {
 }
 
 ssv_set_custom_ipsw_name() {
-    if [[ $SKIP_SETUP_DEV -eq 1 && $SSHD_DEV -eq 1 ]]; then
-        CUSTOM_IPSW_NAME="custom_ssv_skip_setup_ssh.ipsw"
-    elif [[ $SKIP_SETUP_DEV -eq 1 ]]; then
-        CUSTOM_IPSW_NAME="custom_ssv_skip_setup.ipsw"
-    elif [[ $SSHD_DEV -eq 1 ]]; then
-        CUSTOM_IPSW_NAME="custom_ssv_ssh.ipsw"
-    else
-        CUSTOM_IPSW_NAME="custom.ipsw"
+    CUSTOM_IPSW_NAME="customssvpatched_${VERSION}_${IDENTIFIER}.ipsw"
+    SSV_IPSW_STATE_PATH="$restoredir/${CUSTOM_IPSW_NAME%.ipsw}.config.sha256"
+}
+
+ssv_current_ipsw_fingerprint() {
+    local custom_active=0
+    if ssv_custom_binpatches_are_active; then
+        custom_active=1
     fi
+    python3 - "$IDENTIFIER" "$VERSION" "$BUILD" \
+        "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_active" \
+        "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" <<'PY'
+import glob
+import hashlib
+import json
+import os
+import sys
+
+(
+    identifier,
+    ios,
+    build,
+    skip_setup,
+    sshd,
+    custom_active,
+    config_path,
+    patch_dir,
+) = sys.argv[1:]
+
+enabled_definitions = {}
+if custom_active == "1":
+    with open(config_path, encoding="utf-8") as source:
+        config = json.load(source)
+    enabled_ids = {
+        patch_id for patch_id, enabled in config.items() if enabled is True
+    }
+    for path in sorted(glob.glob(os.path.join(patch_dir, "*.json"))):
+        if os.path.basename(path) == "template_patch.json":
+            continue
+        with open(path, encoding="utf-8") as source:
+            patch = json.load(source)
+        if patch.get("id") in enabled_ids:
+            enabled_definitions[patch["id"]] = patch
+
+state = {
+    "identifier": identifier,
+    "ios": ios,
+    "build": build,
+    "skip_setup": skip_setup == "1",
+    "dropbear_sshd": sshd == "1",
+    "custom_binpatches": enabled_definitions,
+}
+serialized = json.dumps(
+    state, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+).encode()
+print(hashlib.sha256(serialized).hexdigest())
+PY
+}
+
+ssv_ipsw_matches_current_config() {
+    local expected
+    local stored
+
+    [[ -f "$restoredir/$CUSTOM_IPSW_NAME" && \
+       -f "$SSV_IPSW_STATE_PATH" ]] || return 1
+    expected=$(ssv_current_ipsw_fingerprint)
+    read -r stored < "$SSV_IPSW_STATE_PATH"
+    [[ "$stored" == "$expected" ]]
+}
+
+ssv_write_ipsw_fingerprint() {
+    local fingerprint
+    local temporary="${SSV_IPSW_STATE_PATH}.surrealra1n"
+
+    fingerprint=$(ssv_current_ipsw_fingerprint)
+    printf '%s\n' "$fingerprint" > "$temporary"
+    mv "$temporary" "$SSV_IPSW_STATE_PATH"
 }
 
 write_ssv_patch_profile() {
     local profile_directory="boot/profiles/$ECID"
     local profile_path="$profile_directory/$VERSION.json"
+    local custom_binpatches=0
+    if ssv_custom_binpatches_are_active; then
+        custom_binpatches=1
+    fi
     mkdir -p "$profile_directory"
     python3 - "$profile_path" "$ECID" "$IDENTIFIER" "$VERSION" \
-        "$SKIP_SETUP_DEV" "$SSHD_DEV" <<'PY'
+        "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_binpatches" \
+        "$CUSTOM_BINPATCHER_CONFIG" <<'PY'
 import json
 import os
 import sys
 
-path, ecid, identifier, version, skip_setup, sshd = sys.argv[1:]
+(
+    path,
+    ecid,
+    identifier,
+    version,
+    skip_setup,
+    sshd,
+    custom_binpatches,
+    custom_config_path,
+) = sys.argv[1:]
 skip_setup_enabled = skip_setup == "1"
 loader_enabled = sshd == "1"
+custom_enabled = custom_binpatches == "1"
+custom_patch_ids = []
+if custom_enabled:
+    with open(custom_config_path, "r", encoding="utf-8") as source:
+        custom_config = json.load(source)
+    custom_patch_ids = sorted(
+        patch_id for patch_id, enabled in custom_config.items() if enabled is True
+    )
 profile = {
     "schema_version": 1,
     "ecid": ecid,
     "identifier": identifier,
     "ios_version": version,
     "ssv_patches": {
-        "enabled": skip_setup_enabled or loader_enabled,
+        "enabled": skip_setup_enabled or loader_enabled or custom_enabled,
         "skip_setup": skip_setup_enabled,
         "dropbear_sshd": loader_enabled,
+        "custom_binpatches": {
+            "enabled": custom_enabled,
+            "patch_ids": custom_patch_ids,
+        },
         "experimental": True,
     },
     "loader": {
@@ -223,6 +340,7 @@ ssv_patch_root_hash_from_restore_log()(
 
     local ipsw_path="$1"
     local restore_log="$2"
+    local require_anchor="${3:-1}"
     local hash_line=""
     local actual_hash=""
     local expected_hash=""
@@ -241,12 +359,12 @@ ssv_patch_root_hash_from_restore_log()(
     local absolute_ipsw=""
     local payload_size=""
 
-    cleanup_sshd_root_hash() {
+    cleanup_ssv_root_hash() {
         if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
             rm -rf "$temp_dir"
         fi
     }
-    trap cleanup_sshd_root_hash EXIT
+    trap cleanup_ssv_root_hash EXIT
 
     if [[ ! -f "$ipsw_path" || ! -f "$restore_log" ]]; then
         return 0
@@ -275,38 +393,41 @@ inode_matches = re.findall(
     r"SURREALRAIN_MTREE_ANCHOR_INODES=(\d+):(\d+):(\d+):(\d+):(\d+)",
     contents,
 )
-if matches and inode_matches:
-    print(*matches[-1], *inode_matches[-1])
-elif matches:
-    print("MISSING_INODE")
+if matches:
+    print(*matches[-1], *(inode_matches[-1] if inode_matches else ()))
 PY
     )
     if [[ -z "$hash_line" ]]; then
         return 0
     fi
-    if [[ "$hash_line" == "MISSING_INODE" ]]; then
+    read -r actual_hash expected_hash cache_loader_inode \
+        cache_loader_original_inode loader_inode launchd_cache_inode \
+        launchd_cache_original_inode <<< "$hash_line"
+
+    if [[ $require_anchor -eq 1 && -z "$cache_loader_inode" ]]; then
         echo "[!] APFS reported a new root hash, but the SurrealLoader inode report is missing."
         echo "[!] Refusing to patch only half of the authenticated metadata pair."
         exit 1
     fi
 
-    read -r actual_hash expected_hash cache_loader_inode \
-        cache_loader_original_inode loader_inode launchd_cache_inode \
-        launchd_cache_original_inode <<< "$hash_line"
-
     if [[ ! "$actual_hash" =~ ^[0-9a-f]{64}$ || \
-          ! "$expected_hash" =~ ^[0-9a-f]{64}$ || \
-          ! "$cache_loader_inode" =~ ^[1-9][0-9]*$ || \
-          ! "$cache_loader_original_inode" =~ ^[1-9][0-9]*$ || \
-          ! "$loader_inode" =~ ^[1-9][0-9]*$ || \
-          ! "$launchd_cache_inode" =~ ^[1-9][0-9]*$ || \
-          ! "$launchd_cache_original_inode" =~ ^[1-9][0-9]*$ ]]; then
-        echo "[!] Could not parse the root hash/SurrealLoader inode set from $restore_log."
+          ! "$expected_hash" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "[!] Could not parse the root hash from $restore_log."
         exit 1
     fi
-    printf -v anchor_inodes '%s:%s:%s:%s:%s' \
-        "$cache_loader_inode" "$cache_loader_original_inode" "$loader_inode" \
-        "$launchd_cache_inode" "$launchd_cache_original_inode"
+    if [[ $require_anchor -eq 1 ]]; then
+        if [[ ! "$cache_loader_inode" =~ ^[1-9][0-9]*$ || \
+              ! "$cache_loader_original_inode" =~ ^[1-9][0-9]*$ || \
+              ! "$loader_inode" =~ ^[1-9][0-9]*$ || \
+              ! "$launchd_cache_inode" =~ ^[1-9][0-9]*$ || \
+              ! "$launchd_cache_original_inode" =~ ^[1-9][0-9]*$ ]]; then
+            echo "[!] Could not parse the SurrealLoader inode set from $restore_log."
+            exit 1
+        fi
+        printf -v anchor_inodes '%s:%s:%s:%s:%s' \
+            "$cache_loader_inode" "$cache_loader_original_inode" "$loader_inode" \
+            "$launchd_cache_inode" "$launchd_cache_original_inode"
+    fi
 
     temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/surrealra1n-root-hash.XXXXXX")
     absolute_ipsw="$(cd "$(dirname "$ipsw_path")" && pwd)/$(basename "$ipsw_path")"
@@ -335,7 +456,9 @@ PY
     fi
 
     echo "[*] Device reported a new APFS seal hash: $actual_hash"
-    echo "[*] Device reported the SurrealLoader anchor inodes: $anchor_inodes"
+    if [[ $require_anchor -eq 1 ]]; then
+        echo "[*] Device reported the SurrealLoader anchor inodes: $anchor_inodes"
+    fi
     if [[ $patch_root_hash -eq 1 ]]; then
         echo "[*] Updating $target_member in place..."
         unzip -p "$absolute_ipsw" "$target_member" > "$temp_dir/component.im4p"
@@ -359,6 +482,12 @@ PY
     if [[ "$current_hash" != "$actual_hash" ]]; then
         echo "[!] root_hash verification failed after updating the IPSW."
         exit 1
+    fi
+
+    if [[ $require_anchor -ne 1 ]]; then
+        echo "[*] Experimental SSV root_hash is synchronized."
+        echo "[*] This restore attempt can now be repeated."
+        exit 0
     fi
 
     mtree_member="${target_member%.root_hash}.mtree"
@@ -468,17 +597,80 @@ ssv_toggle_ssh(){
     read -p "Press enter to continue"
 }
 
+ssv_toggle_custom_binpatches() {
+    if [[ $SSV_CONFIG_CUSTOM_BINPATCHES -eq 1 ]]; then
+        SSV_CONFIG_CUSTOM_BINPATCHES=0
+        echo "[*] Custom Binpatches: OFF"
+    else
+        SSV_CONFIG_CUSTOM_BINPATCHES=1
+        echo "[*] Custom Binpatches: ON"
+        echo "[!] System binary patches require two restore attempts."
+        echo "[!] Use option 4 to choose the individual patches."
+    fi
+    ssv_apply_config
+    ssv_write_config
+    read -p "Press enter to continue"
+}
+
+ssv_custom_binpatches_configurator() {
+    if ! python3 "$CUSTOM_BINPATCHER_DIR/custom_binpatcher_configurator.py" \
+            --patch-dir "$CUSTOM_BINPATCHER_PATCH_DIR" \
+            --config "$CUSTOM_BINPATCHER_CONFIG"; then
+        echo "[!] Custom Binpatches configurator failed."
+        read -p "Press enter to continue"
+    fi
+}
+
+ssv_custom_binpatches_are_active() {
+    [[ $CUSTOM_BINPATCHES_DEV -eq 1 ]] || return 1
+    python3 - "$CUSTOM_BINPATCHER_CONFIG" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as source:
+        config = json.load(source)
+    active = isinstance(config, dict) and any(value is True for value in config.values())
+except (OSError, json.JSONDecodeError):
+    active = False
+raise SystemExit(0 if active else 1)
+PY
+}
+
+ssv_validate_custom_binpatches() {
+    [[ $CUSTOM_BINPATCHES_DEV -eq 1 ]] || return 0
+    python3 "$CUSTOM_BINPATCHER_DIR/custom_bin_patcher.py" \
+        --patch-dir "$CUSTOM_BINPATCHER_PATCH_DIR" \
+        --config "$CUSTOM_BINPATCHER_CONFIG" \
+        --list >/dev/null
+}
+
+ssv_requires_seal_sync() {
+    [[ $SSHD_DEV -eq 1 ]] || ssv_custom_binpatches_are_active
+}
+
+ssv_confirm_two_pass_restore() {
+    ssv_requires_seal_sync || return 0
+    echo ""
+    echo "[!] This SSV configuration requires two restore attempts."
+    echo "[!] Pass 1 is expected to fail after capturing the new APFS root hash."
+    echo "[!] Run Start Restore again and keep the existing IPSW for pass 2."
+    read -p "Press enter to continue"
+}
+
 
 ssv_restore_log_has_seal_data() {
     local restore_log="$1"
+    local require_inodes="${2:-0}"
 
     [[ -f "$restore_log" ]] || return 1
-    python3 - "$restore_log" <<'PY'
+    python3 - "$restore_log" "$require_inodes" <<'PY'
 import re
 import sys
 
 with open(sys.argv[1], "rb") as restore_log:
     contents = restore_log.read().decode("utf-8", "replace")
+require_inodes = sys.argv[2] == "1"
 hashes = re.findall(
     r"Invalid root hash:\s*([0-9a-fA-F\s]{64,128})"
     r"\s*\(expected:\s*([0-9a-fA-F]{64})\)",
@@ -490,33 +682,40 @@ inodes = re.findall(
     contents,
 )
 valid_hash = any(len(re.sub(r"\s+", "", actual)) == 64 for actual, _ in hashes)
-raise SystemExit(0 if valid_hash and inodes else 1)
+raise SystemExit(0 if valid_hash and (inodes or not require_inodes) else 1)
 PY
 }
 
 ssv_prepare_restore_artifacts() {
+    ssv_validate_custom_binpatches
     ssv_set_custom_ipsw_name
 
     if [[ ! -f "$restoredir/$CUSTOM_IPSW_NAME" ]]; then
         echo "Restore files do not exist, making new ones"
         make_custom_ipsw_a12_ios14
+    elif ! ssv_ipsw_matches_current_config; then
+        echo "[*] The saved IPSW does not match the current SSV configuration."
+        echo "[*] Rebuilding $CUSTOM_IPSW_NAME automatically..."
+        rm -f "$restoredir/$CUSTOM_IPSW_NAME" "$SSV_IPSW_STATE_PATH"
+        make_custom_ipsw_a12_ios14
     else
         echo "Restore files already exist ($CUSTOM_IPSW_NAME)"
         read -p "Would you like to make new ones? (y/n): " restorefiles_remake
         if [[ $restorefiles_remake == Y || $restorefiles_remake == y ]]; then
-            rm -f "$restoredir/$CUSTOM_IPSW_NAME"
+            rm -f "$restoredir/$CUSTOM_IPSW_NAME" "$SSV_IPSW_STATE_PATH"
             make_custom_ipsw_a12_ios14
         fi
     fi
 
-    [[ $SSHD_DEV -eq 1 ]] || return 0
-    if ssv_restore_log_has_seal_data "$restoredir/futurerestore-last.log"; then
-        echo "[*] SSHD restore pass 2/2: using seal data from the restore log."
+    ssv_requires_seal_sync || return 0
+    if ssv_restore_log_has_seal_data \
+            "$restoredir/futurerestore-last.log" "$SSHD_DEV"; then
+        echo "[*] SSV restore pass 2/2: using seal data from the restore log."
         ssv_patch_root_hash_from_restore_log \
             "$restoredir/$CUSTOM_IPSW_NAME" \
-            "$restoredir/futurerestore-last.log"
+            "$restoredir/futurerestore-last.log" "$SSHD_DEV"
     else
-        echo "[*] SSHD restore pass 1/2: capturing the device root hash."
+        echo "[*] SSV restore pass 1/2: capturing the device root hash."
         echo "[*] Run the same restore again after this expected failure."
     fi
 }
@@ -528,35 +727,193 @@ ssv_handle_restore_success() {
 ssv_handle_restore_failure() {
     local restore_log="$1"
 
-    [[ $SSHD_DEV -eq 1 ]] || return 0
-    if ssv_restore_log_has_seal_data "$restore_log"; then
-        echo "[*] SSHD restore pass 1/2 completed."
+    ssv_requires_seal_sync || return 0
+    if ssv_restore_log_has_seal_data "$restore_log" "$SSHD_DEV"; then
+        echo "[*] SSV restore pass 1/2 completed."
         echo "[*] Run the same restore again to complete pass 2/2."
     fi
 }
 
 ssv_finish_ipsw_build() {
-    if [[ $SSHD_DEV -eq 1 && -f "$restoredir/futurerestore-last.log" ]]; then
+    ssv_write_ipsw_fingerprint
+    if ssv_requires_seal_sync && \
+            [[ -f "$restoredir/futurerestore-last.log" ]]; then
         mv -f "$restoredir/futurerestore-last.log" \
             "$restoredir/futurerestore-previous.log"
     fi
 }
 
+ssv_apply_custom_binpatches() (
+    set -euo pipefail
+    ssv_custom_binpatches_are_active || return 0
+
+    local source_dmg="$1"
+    local output_dmg="$2"
+    local mount_plist="$SCRIPT_DIR/work/custom-binpatcher-mount.plist"
+    local shadow_file="$SCRIPT_DIR/work/custom-binpatcher-system.shadow"
+    local merged_dmg="$SCRIPT_DIR/work/custom-binpatcher-system.dmg"
+    local metadata="$SCRIPT_DIR/work/custom-binpatcher-metadata.json"
+    local backup_dir="$SCRIPT_DIR/$restoredir/custom-binpatcher-backups/${BUILD:-unknown}"
+    local signed_dir="$SCRIPT_DIR/work/custom-binpatcher-signed"
+    local system_mount=""
+    local python_bin
+    python_bin=$(command -v python3)
+
+    cleanup_custom_binpatcher_mount() {
+        if [[ -n "$system_mount" ]]; then
+            hdiutil detach "$system_mount" >/dev/null 2>&1 || true
+        fi
+        rm -f "$mount_plist" "$shadow_file" "$merged_dmg"
+    }
+    trap cleanup_custom_binpatcher_mount EXIT
+
+    rm -rf "$signed_dir"
+    rm -f "$metadata" "$mount_plist" "$shadow_file" "$merged_dmg"
+    mkdir -p "$backup_dir" "$signed_dir"
+
+    echo "[*] Mounting a writable shadow of the target System volume..."
+    hdiutil attach -nobrowse -noverify -owners on \
+        -shadow "$shadow_file" -plist "$source_dmg" > "$mount_plist"
+    system_mount=$(python3 - "$mount_plist" <<'PY'
+import os
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    description = plistlib.load(source)
+for entity in description.get("system-entities", []):
+    mount_point = entity.get("mount-point")
+    if mount_point and os.path.isdir(os.path.join(mount_point, "usr")):
+        print(mount_point)
+        break
+PY
+    )
+    if [[ -z "$system_mount" ]]; then
+        echo "[!] Could not locate the mounted target System volume."
+        return 1
+    fi
+
+    echo "[*] Applying configured Custom Binpatches..."
+    sudo "$python_bin" "$CUSTOM_BINPATCHER_DIR/custom_bin_patcher.py" \
+        --system-root "$system_mount" \
+        --ios "$VERSION" \
+        --build "$BUILD" \
+        --patch-dir "$CUSTOM_BINPATCHER_PATCH_DIR" \
+        --config "$CUSTOM_BINPATCHER_CONFIG" \
+        --sign-tool "$SCRIPT_DIR/bin/ldid" \
+        --backup-dir "$backup_dir" \
+        --metadata-output "$metadata"
+    sudo chown -R "$(id -u):$(id -g)" "$backup_dir" "$metadata"
+
+    python3 - "$system_mount" "$metadata" "$signed_dir" <<'PY'
+import json
+import os
+import shutil
+import sys
+
+system_root, metadata_path, output_root = sys.argv[1:]
+with open(metadata_path, encoding="utf-8") as source:
+    metadata = json.load(source)
+for item in metadata:
+    relative = item["target"].lstrip("/")
+    source_path = os.path.join(system_root, relative)
+    output_path = os.path.join(output_root, relative)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    shutil.copyfile(source_path, output_path)
+    os.chmod(output_path, os.stat(source_path).st_mode & 0o7777)
+PY
+
+    sync
+    hdiutil detach "$system_mount"
+    system_mount=""
+
+    echo "[*] Materializing the patched System image..."
+    hdiutil convert "$source_dmg" \
+        -shadow "$shadow_file" \
+        -format ULFO \
+        -o "$merged_dmg"
+    [[ -s "$merged_dmg" ]] || {
+        echo "[!] hdiutil did not create the patched System image."
+        return 1
+    }
+    echo "[*] Rebuilding ASR checksums for the patched System image..."
+    /usr/sbin/asr imagescan \
+        --source "$merged_dmg" \
+        --nostream
+    /usr/sbin/asr info \
+        --source "$merged_dmg" \
+        --plist >/dev/null
+    mv "$merged_dmg" "$output_dmg"
+    rm -f "$shadow_file"
+    echo "[*] Custom Binpatches applied to the target System image."
+)
+
+ssv_patch_custom_canonical_mtree() {
+    ssv_custom_binpatches_are_active || return 0
+
+    local mtree_path="$1"
+    local metadata="$SCRIPT_DIR/work/custom-binpatcher-metadata.json"
+    local temp_dir="$SCRIPT_DIR/work/custom-binpatcher-mtree"
+    local payload_size
+
+    [[ -f "$mtree_path" && -f "$metadata" ]] || {
+        echo "[!] Custom Binpatcher mtree inputs are missing."
+        return 1
+    }
+
+    rm -rf "$temp_dir"
+    mkdir -p "$temp_dir/canonical" "$temp_dir/verify"
+    ./bin/img4 -i "$mtree_path" -o "$temp_dir/mtree.archive"
+    payload_size=$(stat_size "$temp_dir/mtree.archive")
+    /usr/bin/aa extract \
+        -i "$temp_dir/mtree.archive" \
+        -d "$temp_dir/canonical"
+    python3 modules/ssv/patch_custom_mtree.py \
+        "$temp_dir/canonical/mtree.txt" "$metadata"
+    xattr -cr "$temp_dir/canonical" 2>/dev/null || true
+    python3 modules/ssv/repack_aa_exact.py \
+        "$temp_dir/canonical" "$temp_dir/mtree.patched.archive" "$payload_size"
+
+    cp "$mtree_path" "$temp_dir/mtree.patched.im4p"
+    ./bin/img4 \
+        -i "$temp_dir/mtree.patched.im4p" \
+        -R "$temp_dir/mtree.patched.archive"
+    if [[ $(stat_size "$temp_dir/mtree.patched.im4p") != \
+          $(stat_size "$mtree_path") ]]; then
+        echo "[!] Custom Binpatcher mtree IMG4 changed size."
+        return 1
+    fi
+
+    ./bin/img4 \
+        -i "$temp_dir/mtree.patched.im4p" \
+        -o "$temp_dir/mtree.verify.archive"
+    /usr/bin/aa list -i "$temp_dir/mtree.verify.archive" >/dev/null
+    /usr/bin/aa extract \
+        -i "$temp_dir/mtree.verify.archive" \
+        -d "$temp_dir/verify"
+    python3 modules/ssv/patch_custom_mtree.py \
+        "$temp_dir/verify/mtree.txt" "$metadata" --verify
+    mv "$temp_dir/mtree.patched.im4p" "$mtree_path"
+    echo "[*] Custom Binpatcher canonical mtree inodes synchronized."
+}
+
 ssv_install_seal_probes() {
-    [[ $SSHD_DEV -eq 1 ]] || return 0
+    ssv_requires_seal_sync || return 0
 
     local deployment_target
     deployment_target=$(ssv_deployment_target)
 
-    echo "[*] Building the native mtree seal probe..."
-    xcrun --sdk iphoneos clang \
-        -arch arm64 \
-        -miphoneos-version-min="$deployment_target" \
-        -Os \
-        -Wl,-dead_strip \
-        payloads/dropbear_sshd/mtree_wrapper.c \
-        -o work/surrealra1n_mtree_wrapper
-    ./bin/ldid -S work/surrealra1n_mtree_wrapper
+    if [[ $SSHD_DEV -eq 1 ]]; then
+        echo "[*] Building the native mtree seal probe..."
+        xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -miphoneos-version-min="$deployment_target" \
+            -Os \
+            -Wl,-dead_strip \
+            payloads/dropbear_sshd/mtree_wrapper.c \
+            -o work/surrealra1n_mtree_wrapper
+        ./bin/ldid -S work/surrealra1n_mtree_wrapper
+    fi
 
     echo "[*] Building the native APFS digest probe..."
     xcrun --sdk iphoneos clang \
@@ -568,14 +925,16 @@ ssv_install_seal_probes() {
         -o work/surrealra1n_apfs_sealvolume_wrapper
     ./bin/ldid -S work/surrealra1n_apfs_sealvolume_wrapper
 
-    echo "[*] Installing the native mtree seal probe..."
-    ./bin/hfsplus work/ramdisk.raw extract usr/sbin/mtree work/mtree.real
-    ./bin/hfsplus work/ramdisk.raw rm usr/sbin/mtree
-    ./bin/hfsplus work/ramdisk.raw add work/mtree.real usr/sbin/mtree.real
-    ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/sbin/mtree.real
-    ./bin/hfsplus work/ramdisk.raw add \
-        work/surrealra1n_mtree_wrapper usr/sbin/mtree
-    ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/sbin/mtree
+    if [[ $SSHD_DEV -eq 1 ]]; then
+        echo "[*] Installing the native mtree seal probe..."
+        ./bin/hfsplus work/ramdisk.raw extract usr/sbin/mtree work/mtree.real
+        ./bin/hfsplus work/ramdisk.raw rm usr/sbin/mtree
+        ./bin/hfsplus work/ramdisk.raw add work/mtree.real usr/sbin/mtree.real
+        ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/sbin/mtree.real
+        ./bin/hfsplus work/ramdisk.raw add \
+            work/surrealra1n_mtree_wrapper usr/sbin/mtree
+        ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/sbin/mtree
+    fi
 
     echo "[*] Installing the native APFS digest probe..."
     ./bin/hfsplus work/ramdisk.raw extract \
@@ -828,7 +1187,8 @@ PY
 
 ssv_patch_restore_trustcache() {
     if [[ ! -f work/trustcache.raw ]]; then
-        if [[ $SKIP_SETUP_DEV -ne 1 && $SSHD_DEV -ne 1 ]]; then
+        if [[ $SKIP_SETUP_DEV -ne 1 && $SSHD_DEV -ne 1 ]] && \
+                ! ssv_custom_binpatches_are_active; then
             return 0
         fi
         ./bin/img4 \
@@ -846,9 +1206,11 @@ ssv_patch_restore_trustcache() {
         ./bin/trustcache append \
             work/trustcache.raw work/surrealra1n_mtree_wrapper
         ./bin/trustcache append \
-            work/trustcache.raw work/surrealra1n_apfs_sealvolume_wrapper
-        ./bin/trustcache append \
             work/trustcache.raw "${SSHD_PAYLOAD_MACHO_FILES[@]}"
+    fi
+    if ssv_requires_seal_sync; then
+        ./bin/trustcache append \
+            work/trustcache.raw work/surrealra1n_apfs_sealvolume_wrapper
     fi
     ./bin/img4 \
         -i work/trustcache.raw \
@@ -857,17 +1219,27 @@ ssv_patch_restore_trustcache() {
 }
 
 ssv_patch_static_trustcache() {
-    [[ $SSHD_DEV -eq 1 ]] || return 0
+    local -a required_files=()
+    local custom_file
+    if [[ $SSHD_DEV -eq 1 ]]; then
+        required_files+=("${SSHD_PAYLOAD_MACHO_FILES[@]}")
+    fi
+    if ssv_custom_binpatches_are_active; then
+        while IFS= read -r custom_file; do
+            required_files+=("$custom_file")
+        done < <(find work/custom-binpatcher-signed -type f -print)
+    fi
+    [[ ${#required_files[@]} -gt 0 ]] || return 0
 
-    echo "[*] Building a normalized StaticTrustCache for the SSH runtime..."
+    echo "[*] Building a normalized StaticTrustCache for SSV customizations..."
     ./bin/img4 \
         -i "tmp1/Firmware/$fs_dmg_name.trustcache" \
         -o work/rootfs-trustcache.raw
     ./bin/trustcache create -v 1 \
-        work/sshd-payload-trustcache.raw "${SSHD_PAYLOAD_MACHO_FILES[@]}"
+        work/ssv-required-trustcache.raw "${required_files[@]}"
     python3 modules/ssv/normalize_trustcache.py \
         work/rootfs-trustcache.raw \
-        --require work/sshd-payload-trustcache.raw
+        --require work/ssv-required-trustcache.raw
     cp "tmp1/Firmware/$fs_dmg_name.trustcache" \
         "tmp2/Firmware/$fs_dmg_18_name.trustcache"
     ./bin/img4 \

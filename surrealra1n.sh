@@ -391,7 +391,7 @@ if [[ $LATEST_VERSION != $CURRENT_VERSION ]]; then
         exit 0
     else
         echo "You have declined the update."
-        echo "This version of surrealra1n is no longer supported, so it is recommended to update as soon as possible."
+        echo "Continuing without the update. Some features may be outdated."
         outdated=1
         read -p "Press enter to continue"
     fi
@@ -2244,6 +2244,9 @@ if [[ $IDENTIFIER == iPhone12* ]]; then
     cp -v tmp1/Firmware/pmp/$PMP tmp2/Firmware/pmp/$PMP
 fi
 cp -v $fs_dmg $fs_dmg_18 # replace rootfs in the IPSW
+ssv_apply_custom_binpatches "$fs_dmg" "$fs_dmg_18"
+ssv_patch_custom_canonical_mtree \
+    "tmp2/Firmware/$fs_dmg_18_name.mtree"
 cp -v tmp1/Firmware/$fs_dmg_name.trustcache tmp2/Firmware/$fs_dmg_18_name.trustcache 
 cp -v tmp1/Firmware/$ramdisk_dmg_name.trustcache tmp2/Firmware/$ramdisk_dmg_name_18.trustcache
 ./bin/img4 -i tmp1/$KERNEL -o work/kernel.raw
@@ -3122,6 +3125,8 @@ elif [[ $tether_options == 2 ]]; then
     fi
     restore_tethered_opts
 elif [[ $tether_options == 3 ]]; then
+    ssv_validate_custom_binpatches
+    ssv_confirm_two_pass_restore
     if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12* || $IDENTIFIER == iPad11* ]]; then
         do_tethered_restore_a12_a13
     elif [[ $VERSION == 7.* || $VERSION == 8.* || $VERSION == 9.* ]]; then
@@ -3255,15 +3260,6 @@ fi
 
 restore_utils(){
 
-if [[ $outdated == 1 ]]; then
-    echo "This surrealra1n beta has expired"
-    echo "A newer beta is available. Please update to continue."
-    echo "You will need to exit, re-run surrealra1n.sh, and when it prompts for an update, update surrealra1n."
-    sleep 10
-    main_menu
-    return
-fi
-
 if [[ $IDENTIFIER == NONE ]]; then
     main_menu
     return
@@ -3277,6 +3273,10 @@ fi
 
 clear 
 echo "$INFO_TEXT"
+if [[ $outdated == 1 ]]; then
+    echo "[!] A newer surrealra1n version is available."
+    echo "[!] Continuing without updating; some features may be outdated."
+fi
 echo ""
 echo "Options:"
 echo ""
