@@ -68,6 +68,19 @@ def selector_matches(pattern, value):
     return isinstance(pattern, str) and value is not None and fnmatch.fnmatchcase(value, pattern)
 
 
+def ios_selector_matches(pattern, value):
+    if value is None:
+        return False
+    expected, wildcard = parse_ios_version(pattern, "variant ios", True)
+    current, _ = parse_ios_version(value, "--ios", False)
+    if wildcard:
+        return current[: len(expected)] == expected
+    size = max(len(expected), len(current))
+    return expected + (0,) * (size - len(expected)) == current + (0,) * (
+        size - len(current)
+    )
+
+
 def parse_ios_version(value, field, allow_wildcard):
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be a version string")
@@ -145,7 +158,7 @@ def variant_rank(variant, ios, build):
         raise ValueError("variant cannot combine ios with ios_min or ios_max")
     if ios_pattern is None and build_pattern is None and not has_range:
         raise ValueError("variant needs ios, ios_min, ios_max, build, or default")
-    if ios_pattern is not None and not selector_matches(ios_pattern, ios):
+    if ios_pattern is not None and not ios_selector_matches(ios_pattern, ios):
         return None
     if build_pattern is not None and not selector_matches(build_pattern, build):
         return None
@@ -295,7 +308,8 @@ def validate_groups(groups):
             before = original[start:end]
             if before != operation["expected"]:
                 raise ValueError(
-                    f"{operation['patch_id']}: expected mismatch at 0x{start:x} "
+                    f"{operation['patch_id']} ({operation['variant']}): "
+                    f"expected mismatch at 0x{start:x} "
                     f"(found {before.hex(' ')})"
                 )
         group["original"] = original
