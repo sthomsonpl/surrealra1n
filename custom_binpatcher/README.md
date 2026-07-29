@@ -35,7 +35,7 @@ Saving creates `custom_binpatcher/patches.json` if it does not exist.
 The same configurator is available from:
 
 ```text
-Restore menu → SSV Config → Custom Binpatches Configurator
+Restore menu → System Patches Config → Custom Binpatches Configurator
 ```
 
 The `Custom Binpatches` master switch and the individual patch switch must both
@@ -54,10 +54,11 @@ customssvpatched_15.6.1_iPhone12,5.ipsw
 ```
 
 Skip Setup, SSH, and all enabled Custom Binpatches are combined in this one
-image. A configuration fingerprint is stored beside it. Changing an SSV option,
+image. A configuration fingerprint is stored beside it. Changing a System
+Patches option,
 an individual patch state, or the contents of an enabled patch automatically
-rebuilds the IPSW. The second SSV restore pass reuses the same image when its
-configuration has not changed.
+rebuilds the IPSW. For sealed targets, the second restore pass reuses the same
+image when its configuration has not changed.
 
 ## Patch format
 
@@ -163,18 +164,22 @@ Useful options:
 --list                 List available patches and their state
 ```
 
-## SSV restore workflow
+## System volume restore workflow
 
-When active custom patches are used, surrealra1n mounts a writable shadow of
-the System image, applies and signs the configured patches, updates the
-canonical mtree inode entries and StaticTrustCache, materializes the modified
-image, and rebuilds its ASR checksums.
+When active custom patches are used, surrealra1n detects the System volume mode
+from `BuildManifest.plist`, mounts a writable shadow of the System image,
+applies and signs the configured patches, updates StaticTrustCache,
+materializes the modified image, and rebuilds its ASR checksums.
 
-This SSV workflow requires two restore attempts:
+For a sealed System Volume, surrealra1n also updates canonical mtree inode
+entries. The sealed workflow requires two restore attempts:
 
 1. the first attempt captures the APFS seal hash and is expected to fail;
 2. start the restore again, keep the existing IPSW, and let surrealra1n update
    its root hash metadata before the second attempt.
 
+An unsealed System Volume skips root hash, canonical mtree, and seal-probe
+handling and completes in one restore attempt.
+
 surrealra1n does not rebuild snapshots or root hashes inside Custom Binpatcher
-itself; those steps remain part of the surrounding SSV restore workflow.
+itself; those steps remain part of the surrounding sealed System workflow.

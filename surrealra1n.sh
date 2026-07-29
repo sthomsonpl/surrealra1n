@@ -2237,6 +2237,8 @@ if [[ $VERSION == 13.* ]] && [[ $IDENTIFIER == iPhone12,8 ]]; then
 else
     cp -v tmp1/Firmware/$IOFW tmp2/Firmware/$IOFW
     cp -v tmp1/Firmware/ave/$AVE tmp2/Firmware/ave/$AVE
+fi
+if [[ $SYSTEM_VOLUME_MODE == sealed ]]; then
     cp -v tmp1/Firmware/$fs_dmg_name.root_hash tmp2/Firmware/$fs_dmg_18_name.root_hash
     cp -v tmp1/Firmware/$fs_dmg_name.mtree tmp2/Firmware/$fs_dmg_18_name.mtree
 fi
@@ -2330,7 +2332,7 @@ if [[ $VERSION == 15.* ]]; then
 fi
 ssv_patch_restore_trustcache
 ssv_patch_static_trustcache
-# Use a separate experimental SSV IPSW.
+# Use a separate experimental System-patched IPSW.
 ssv_set_custom_ipsw_name
 # pack rdsk into im4p
 ./bin/img4 -i work/ramdisk.raw -o $restore_ramdisk_dmg_18 -A -T rdsk
@@ -2804,6 +2806,10 @@ elif [[ $VERSION == 15.4* || $VERSION == 15.5* || $VERSION == 15.6* ]] && [[ $ID
     sleep 4
 fi
 
+ssv_prepare_runtime_for_ipsw "$IPSW_PATH"
+ssv_validate_custom_binpatches
+ssv_confirm_two_pass_restore
+
 if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12* ]]; then
     dfu_helper_a11
 else
@@ -3164,8 +3170,6 @@ elif [[ $tether_options == 2 ]]; then
     fi
     restore_tethered_opts
 elif [[ $tether_options == 3 ]]; then
-    ssv_validate_custom_binpatches
-    ssv_confirm_two_pass_restore
     if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12* || $IDENTIFIER == iPad11* ]]; then
         do_tethered_restore_a12_a13
     elif [[ $VERSION == 7.* || $VERSION == 8.* || $VERSION == 9.* ]]; then

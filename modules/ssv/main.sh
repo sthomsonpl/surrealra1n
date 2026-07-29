@@ -11,6 +11,7 @@ CUSTOM_BINPATCHES_DEV=0
 CUSTOM_BINPATCHER_DIR=${CUSTOM_BINPATCHER_DIR:-"$SCRIPT_DIR/custom_binpatcher"}
 CUSTOM_BINPATCHER_CONFIG=${CUSTOM_BINPATCHER_CONFIG:-"$CUSTOM_BINPATCHER_DIR/patches.json"}
 CUSTOM_BINPATCHER_PATCH_DIR=${CUSTOM_BINPATCHER_PATCH_DIR:-"$CUSTOM_BINPATCHER_DIR/patches"}
+SYSTEM_VOLUME_MODE=${SYSTEM_VOLUME_MODE:-unknown}
 
 ssv_reset_options() {
     ssv_apply_config
@@ -81,7 +82,7 @@ if config.get("schema_version") != 1:
 patched = config.get("ssv_patched")
 patches = config.get("patches")
 if not isinstance(patched, bool) or not isinstance(patches, dict):
-    raise ValueError("invalid SSV configuration")
+    raise ValueError("invalid System Patches configuration")
 
 skip_setup = patches.get("skip_setup")
 sshd = patches.get("dropbear_sshd")
@@ -96,7 +97,7 @@ if (
 print(int(patched), int(skip_setup), int(sshd), int(custom_binpatches))
 PY
     ); then
-        echo "[!] Invalid SSV configuration in $SSV_CONFIG_PATH; all SSV patches are disabled."
+        echo "[!] Invalid System Patches configuration in $SSV_CONFIG_PATH; all System Patches are disabled."
         ssv_apply_config
         return
     fi
@@ -115,13 +116,74 @@ ssv_deployment_target() {
     fi
 }
 
+ssv_ios_major() {
+    local major=${VERSION%%.*}
+    [[ $major =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "$major"
+}
+
+ssv_ios15_features_are_supported() {
+    local major
+    major=$(ssv_ios_major) || return 1
+    [[ $major -ge 15 && $SYSTEM_VOLUME_MODE == sealed ]]
+}
+
+ssv_detect_system_volume_mode() {
+    local ipsw_path="$1"
+    python3 "$SCRIPT_DIR/modules/ssv/detect_system_volume.py" "$ipsw_path"
+}
+
+ssv_configure_runtime_for_volume() {
+    local mode="$1"
+
+    case "$mode" in
+        sealed|unsealed) SYSTEM_VOLUME_MODE="$mode" ;;
+        *)
+            echo "[!] Unsupported System volume mode: $mode"
+            return 1
+            ;;
+    esac
+
+    # Start from the persisted choices before applying per-target capabilities.
+    ssv_apply_config
+    if ! ssv_ios15_features_are_supported; then
+        if [[ $SKIP_SETUP_DEV -eq 1 ]]; then
+            echo "[!] Skip Setup requires a sealed System Volume on iOS 15+."
+            echo "[*] Skip Setup is disabled for this restore."
+        fi
+        if [[ $SSHD_DEV -eq 1 ]]; then
+            echo "[!] SSH/Dropbear requires a sealed System Volume on iOS 15+."
+            echo "[*] SSH/Dropbear is disabled for this restore."
+        fi
+        SKIP_SETUP_DEV=0
+        SSHD_DEV=0
+    fi
+}
+
+ssv_prepare_runtime_for_ipsw() {
+    local ipsw_path="$1"
+    local detected_mode
+
+    if ! detected_mode=$(ssv_detect_system_volume_mode "$ipsw_path"); then
+        echo "[!] Could not determine the target System volume format."
+        return 1
+    fi
+    ssv_configure_runtime_for_volume "$detected_mode"
+    if [[ $SYSTEM_VOLUME_MODE == sealed ]]; then
+        echo "[*] Detected sealed System Volume (root_hash + canonical mtree)."
+    else
+        echo "[*] Detected unsealed System Volume."
+        echo "[*] Seal synchronization and canonical mtree patching are not required."
+    fi
+}
+
 ssv_print_menu_options() {
     if [[ $SSV_PATCHED -eq 1 ]]; then
-        echo "4. SSV Patched [ON]"
+        echo "4. System Patches [ON]"
     else
-        echo "4. SSV Patched [OFF]"
+        echo "4. System Patches [OFF]"
     fi
-    echo "5. SSV Config"
+    echo "5. System Patches Config"
 }
 
 ssv_select_menu_option() {
@@ -135,10 +197,10 @@ ssv_select_menu_option() {
 ssv_toggle_patched() {
     if [[ $SSV_PATCHED -eq 1 ]]; then
         SSV_PATCHED=0
-        echo "[*] SSV patches: OFF"
+        echo "[*] System Patches: OFF"
     else
         SSV_PATCHED=1
-        echo "[*] SSV patches: ON"
+        echo "[*] System Patches: ON"
     fi
     ssv_apply_config
     ssv_write_config
@@ -149,21 +211,21 @@ ssv_config_menu() {
     local ssv_config_option
     while true; do
         clear
-        echo "SSV Configuration:"
+        echo "System Patches Configuration:"
         echo ""
         if [[ $SSV_PATCHED -eq 0 ]]; then
-            echo "SSV Patched is OFF. These settings are saved but currently inactive."
+            echo "System Patches are OFF. These settings are saved but currently inactive."
             echo ""
         fi
         if [[ $SSV_CONFIG_SKIP_SETUP -eq 1 ]]; then
-            echo "1. Skip Setup (A13 tested; activation required) [ON]"
+            echo "1. Skip Setup (iOS 15+; activation required) [ON]"
         else
-            echo "1. Skip Setup (A13 tested; activation required) [OFF]"
+            echo "1. Skip Setup (iOS 15+; activation required) [OFF]"
         fi
         if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
-            echo "2. SSH patches (A13 tested) [ON]"
+            echo "2. SSH patches (iOS 15+) [ON]"
         else
-            echo "2. SSH patches (A13 tested) [OFF]"
+            echo "2. SSH patches (iOS 15+) [OFF]"
         fi
         if [[ $SSV_CONFIG_CUSTOM_BINPATCHES -eq 1 ]]; then
             echo "3. Custom Binpatches [ON]"
@@ -199,7 +261,8 @@ ssv_current_ipsw_fingerprint() {
     fi
     python3 - "$IDENTIFIER" "$VERSION" "$BUILD" \
         "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_active" \
-        "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" <<'PY'
+        "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" \
+        "$SYSTEM_VOLUME_MODE" <<'PY'
 import glob
 import hashlib
 import json
@@ -215,6 +278,7 @@ import sys
     custom_active,
     config_path,
     patch_dir,
+    volume_mode,
 ) = sys.argv[1:]
 
 enabled_definitions = {}
@@ -236,6 +300,7 @@ state = {
     "identifier": identifier,
     "ios": ios,
     "build": build,
+    "system_volume_mode": volume_mode,
     "skip_setup": skip_setup == "1",
     "dropbear_sshd": sshd == "1",
     "custom_binpatches": enabled_definitions,
@@ -277,7 +342,7 @@ write_ssv_patch_profile() {
     mkdir -p "$profile_directory"
     python3 - "$profile_path" "$ECID" "$IDENTIFIER" "$VERSION" \
         "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_binpatches" \
-        "$CUSTOM_BINPATCHER_CONFIG" <<'PY'
+        "$CUSTOM_BINPATCHER_CONFIG" "$SYSTEM_VOLUME_MODE" <<'PY'
 import json
 import os
 import sys
@@ -291,6 +356,7 @@ import sys
     sshd,
     custom_binpatches,
     custom_config_path,
+    volume_mode,
 ) = sys.argv[1:]
 skip_setup_enabled = skip_setup == "1"
 loader_enabled = sshd == "1"
@@ -302,21 +368,25 @@ if custom_enabled:
     custom_patch_ids = sorted(
         patch_id for patch_id, enabled in custom_config.items() if enabled is True
     )
+patch_profile = {
+    "enabled": skip_setup_enabled or loader_enabled or custom_enabled,
+    "skip_setup": skip_setup_enabled,
+    "dropbear_sshd": loader_enabled,
+    "custom_binpatches": {
+        "enabled": custom_enabled,
+        "patch_ids": custom_patch_ids,
+    },
+    "experimental": True,
+}
 profile = {
     "schema_version": 1,
     "ecid": ecid,
     "identifier": identifier,
     "ios_version": version,
-    "ssv_patches": {
-        "enabled": skip_setup_enabled or loader_enabled or custom_enabled,
-        "skip_setup": skip_setup_enabled,
-        "dropbear_sshd": loader_enabled,
-        "custom_binpatches": {
-            "enabled": custom_enabled,
-            "patch_ids": custom_patch_ids,
-        },
-        "experimental": True,
-    },
+    "system_volume_mode": volume_mode,
+    "system_patches": patch_profile,
+    # Retained for compatibility with existing profile consumers.
+    "ssv_patches": patch_profile,
     "loader": {
         "binary": "/usr/libexec/surreal_loader",
         "services_path": "/var/jb/Library/SurrealLoader/Services",
@@ -331,7 +401,7 @@ with open(temporary, "w", encoding="utf-8") as output:
     os.fsync(output.fileno())
 os.replace(temporary, path)
 PY
-    echo "[*] Saved experimental SSV patch profile: $profile_path"
+    echo "[*] Saved experimental System Patches profile: $profile_path"
 }
 
 ssv_patch_root_hash_from_restore_log()(
@@ -485,7 +555,7 @@ PY
     fi
 
     if [[ $require_anchor -ne 1 ]]; then
-        echo "[*] Experimental SSV root_hash is synchronized."
+        echo "[*] Experimental sealed System root_hash is synchronized."
         echo "[*] This restore attempt can now be repeated."
         exit 0
     fi
@@ -558,7 +628,7 @@ PY
         exit 1
     fi
 
-    echo "[*] Experimental SSV root_hash and canonical mtree are synchronized."
+    echo "[*] Experimental sealed System root_hash and canonical mtree are synchronized."
     echo "[*] This restore attempt can now be repeated."
 )
 
@@ -569,7 +639,6 @@ ssv_toggle_skip_setup(){
     else
         SSV_CONFIG_SKIP_SETUP=1
         echo "[*] Experimental Skip Setup: ON"
-        echo "[!] This patch was tested only on A13."
         echo "[!] Device and iOS compatibility is not guaranteed."
         echo "[!] This does not bypass activation."
     fi
@@ -581,11 +650,10 @@ ssv_toggle_skip_setup(){
 ssv_toggle_ssh(){
     if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
         SSV_CONFIG_SSHD=0
-        echo "[*] Experimental SSV SSH patches: OFF"
+        echo "[*] Experimental System SSH patches: OFF"
     else
         SSV_CONFIG_SSHD=1
-        echo "[*] Experimental SSV SSH patches: ON"
-        echo "[!] This patch was tested only on A13."
+        echo "[*] Experimental System SSH patches: ON"
         echo "[!] Device and iOS compatibility is not guaranteed."
         echo "[!] This customization requires two restore attempts."
         echo "[!] The first pass captures the root hash; the second completes the restore."
@@ -604,7 +672,8 @@ ssv_toggle_custom_binpatches() {
     else
         SSV_CONFIG_CUSTOM_BINPATCHES=1
         echo "[*] Custom Binpatches: ON"
-        echo "[!] System binary patches require two restore attempts."
+        echo "[!] Sealed System Volumes require two restore attempts."
+        echo "[*] Unsealed System Volumes are patched in a single restore."
         echo "[!] Use option 4 to choose the individual patches."
     fi
     ssv_apply_config
@@ -646,13 +715,14 @@ ssv_validate_custom_binpatches() {
 }
 
 ssv_requires_seal_sync() {
+    [[ $SYSTEM_VOLUME_MODE == sealed ]] || return 1
     [[ $SSHD_DEV -eq 1 ]] || ssv_custom_binpatches_are_active
 }
 
 ssv_confirm_two_pass_restore() {
     ssv_requires_seal_sync || return 0
     echo ""
-    echo "[!] This SSV configuration requires two restore attempts."
+    echo "[!] This sealed System configuration requires two restore attempts."
     echo "[!] Pass 1 is expected to fail after capturing the new APFS root hash."
     echo "[!] Run Start Restore again and keep the existing IPSW for pass 2."
     read -p "Press enter to continue"
@@ -687,6 +757,10 @@ PY
 }
 
 ssv_prepare_restore_artifacts() {
+    if [[ $SYSTEM_VOLUME_MODE == unknown ]]; then
+        echo "[!] System volume mode was not detected before preparing artifacts."
+        return 1
+    fi
     ssv_validate_custom_binpatches
     ssv_set_custom_ipsw_name
 
@@ -694,7 +768,7 @@ ssv_prepare_restore_artifacts() {
         echo "Restore files do not exist, making new ones"
         make_custom_ipsw_a12_ios14
     elif ! ssv_ipsw_matches_current_config; then
-        echo "[*] The saved IPSW does not match the current SSV configuration."
+        echo "[*] The saved IPSW does not match the current System Patches configuration."
         echo "[*] Rebuilding $CUSTOM_IPSW_NAME automatically..."
         rm -f "$restoredir/$CUSTOM_IPSW_NAME" "$SSV_IPSW_STATE_PATH"
         make_custom_ipsw_a12_ios14
@@ -710,12 +784,12 @@ ssv_prepare_restore_artifacts() {
     ssv_requires_seal_sync || return 0
     if ssv_restore_log_has_seal_data \
             "$restoredir/futurerestore-last.log" "$SSHD_DEV"; then
-        echo "[*] SSV restore pass 2/2: using seal data from the restore log."
+        echo "[*] Sealed System restore pass 2/2: using seal data from the restore log."
         ssv_patch_root_hash_from_restore_log \
             "$restoredir/$CUSTOM_IPSW_NAME" \
             "$restoredir/futurerestore-last.log" "$SSHD_DEV"
     else
-        echo "[*] SSV restore pass 1/2: capturing the device root hash."
+        echo "[*] Sealed System restore pass 1/2: capturing the device root hash."
         echo "[*] Run the same restore again after this expected failure."
     fi
 }
@@ -729,7 +803,7 @@ ssv_handle_restore_failure() {
 
     ssv_requires_seal_sync || return 0
     if ssv_restore_log_has_seal_data "$restore_log" "$SSHD_DEV"; then
-        echo "[*] SSV restore pass 1/2 completed."
+        echo "[*] Sealed System restore pass 1/2 completed."
         echo "[*] Run the same restore again to complete pass 2/2."
     fi
 }
@@ -850,6 +924,7 @@ PY
 
 ssv_patch_custom_canonical_mtree() {
     ssv_custom_binpatches_are_active || return 0
+    [[ $SYSTEM_VOLUME_MODE == sealed ]] || return 0
 
     local mtree_path="$1"
     local metadata="$SCRIPT_DIR/work/custom-binpatcher-metadata.json"
@@ -1186,11 +1261,12 @@ PY
 }
 
 ssv_patch_restore_trustcache() {
+    if [[ $SKIP_SETUP_DEV -ne 1 && $SSHD_DEV -ne 1 ]] && \
+            ! ssv_requires_seal_sync; then
+        return 0
+    fi
+
     if [[ ! -f work/trustcache.raw ]]; then
-        if [[ $SKIP_SETUP_DEV -ne 1 && $SSHD_DEV -ne 1 ]] && \
-                ! ssv_custom_binpatches_are_active; then
-            return 0
-        fi
         ./bin/img4 \
             -i "tmp1/Firmware/$ramdisk_dmg_name.trustcache" \
             -o work/trustcache.raw
@@ -1231,7 +1307,7 @@ ssv_patch_static_trustcache() {
     fi
     [[ ${#required_files[@]} -gt 0 ]] || return 0
 
-    echo "[*] Building a normalized StaticTrustCache for SSV customizations..."
+    echo "[*] Building a normalized StaticTrustCache for System customizations..."
     ./bin/img4 \
         -i "tmp1/Firmware/$fs_dmg_name.trustcache" \
         -o work/rootfs-trustcache.raw

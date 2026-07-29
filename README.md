@@ -20,7 +20,10 @@ Extract the zip file and open a terminal window to the folder that contains surr
 
 # Custom Binpatches
 
-Custom binary patches can be configured from the SSV Config menu. See the
+Custom binary patches can be configured from the System Patches Config menu.
+The target IPSW is inspected to select either the sealed or unsealed System
+volume workflow. Skip Setup and SSH require a sealed System Volume on iOS 15+;
+Custom Binpatches also support older targets. See the
 [Custom Binpatcher documentation](custom_binpatcher/README.md) for the patch
 format, version selectors, template, safety checks, and two-pass restore
 workflow.
@@ -32,7 +35,6 @@ libimobiledevice team, tihmstar, LukeeGD/LukeZGD, xerub, plooshi, etc! (for the 
 Mineek - iPhone X restored patcher, used for ipx restores 14.3-15.6.1 (my fork of the patcher is used for seprmvr64 restores on A8+), openra1n, and seprmvr64
 
 Nathan (verygenericname) - SSHRD_Script
-
 
 
 
