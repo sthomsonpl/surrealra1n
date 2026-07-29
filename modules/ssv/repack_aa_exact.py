@@ -10,18 +10,24 @@ import sys
 
 # Keep padding after the canonical files.
 PADDING_NAME = "zzzz.surrealra1n-padding"
+MAX_PADDING_VARIANTS = 32
+MAX_ATTEMPTS_PER_VARIANT = 24
 
 
-def padding_bytes(length: int) -> bytes:
+def padding_bytes(length: int, variant: int) -> bytes:
     output = bytearray()
     counter = 0
     while len(output) < length:
-        output.extend(hashlib.sha256(f"surrealra1n:{counter}".encode()).digest())
+        output.extend(
+            hashlib.sha256(
+                f"surrealra1n:{variant}:{counter}".encode()
+            ).digest()
+        )
         counter += 1
     return bytes(output[:length])
 
 
-def write_padding(path: str, length: int) -> None:
+def write_padding(path: str, length: int, variant: int = 0) -> None:
     if length == 0:
         try:
             os.unlink(path)
@@ -29,7 +35,7 @@ def write_padding(path: str, length: int) -> None:
             pass
         return
     with open(path, "wb") as padding:
-        padding.write(padding_bytes(length))
+        padding.write(padding_bytes(length, variant))
 
 
 def archive(source: str, output: str) -> int:
@@ -46,8 +52,10 @@ def archive(source: str, output: str) -> int:
             "lzfse",
             "-b",
             "8m",
+            "-t",
+            "1",
             "-exclude-field",
-            "xat",
+            "xat,ctm,mtm,btm",
         ],
         check=True,
     )
@@ -59,25 +67,48 @@ def archive(source: str, output: str) -> int:
 def repack(source: str, output: str, target_size: int) -> None:
     padding_path = os.path.join(source, PADDING_NAME)
     temporary_path = f"{output}.temporary"
-    padding_length = 0
+    total_attempts = 0
     try:
-        for attempt in range(96):
-            if attempt > 0 and attempt % 8 == 0:
-                print(
-                    f"[*] Canonical archive sizing attempt {attempt + 1}...",
-                    file=sys.stderr,
-                )
-            write_padding(padding_path, padding_length)
-            size = archive(source, output)
-            if size == target_size:
-                return
-            padding_length = max(0, padding_length + target_size - size)
-            if attempt >= 8 and abs(target_size - size) <= 8:
-                distance = (attempt - 8) // 2 + 1
-                padding_length = max(
-                    0,
-                    padding_length + (distance if attempt % 2 == 0 else -distance),
-                )
+        write_padding(padding_path, 0)
+        base_size = archive(source, output)
+        total_attempts += 1
+        if base_size == target_size:
+            return
+        if base_size > target_size:
+            raise ValueError(
+                "canonical archive without padding exceeds target size "
+                f"({base_size} > {target_size})"
+            )
+
+        initial_padding = target_size - base_size
+        for variant in range(MAX_PADDING_VARIANTS):
+            padding_length = initial_padding
+            seen: set[tuple[int, int]] = set()
+            for attempt in range(MAX_ATTEMPTS_PER_VARIANT):
+                write_padding(padding_path, padding_length, variant)
+                size = archive(source, output)
+                total_attempts += 1
+                if size == target_size:
+                    return
+
+                state = (padding_length, size)
+                if state in seen:
+                    break
+                seen.add(state)
+
+                difference = target_size - size
+                next_length = padding_length + difference
+                if next_length <= 0:
+                    break
+                padding_length = next_length
+
+                if total_attempts % 8 == 0:
+                    print(
+                        "[*] Canonical archive sizing "
+                        f"attempt {total_attempts} "
+                        f"(variant {variant + 1}, delta {difference:+d})...",
+                        file=sys.stderr,
+                    )
     finally:
         try:
             os.unlink(padding_path)
@@ -88,7 +119,10 @@ def repack(source: str, output: str, target_size: int) -> None:
         except FileNotFoundError:
             pass
 
-    raise ValueError(f"could not produce an Apple Archive of {target_size} bytes")
+    raise ValueError(
+        f"could not produce an Apple Archive of {target_size} bytes "
+        f"after {total_attempts} deterministic attempts"
+    )
 
 
 def main() -> int:
