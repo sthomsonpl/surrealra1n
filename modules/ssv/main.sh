@@ -935,6 +935,7 @@ ssv_patch_custom_canonical_mtree() {
     local mtree_path="$1"
     local metadata="$SCRIPT_DIR/work/custom-binpatcher-metadata.json"
     local temp_dir="$SCRIPT_DIR/work/custom-binpatcher-mtree"
+    local archive_format
     local payload_size
 
     [[ -f "$mtree_path" && -f "$metadata" ]] || {
@@ -946,14 +947,27 @@ ssv_patch_custom_canonical_mtree() {
     mkdir -p "$temp_dir/canonical" "$temp_dir/verify"
     ./bin/img4 -i "$mtree_path" -o "$temp_dir/mtree.archive"
     payload_size=$(stat_size "$temp_dir/mtree.archive")
-    /usr/bin/aa extract \
-        -i "$temp_dir/mtree.archive" \
-        -d "$temp_dir/canonical"
+    archive_format=$(od -An -tx1 -N2 "$temp_dir/mtree.archive" | tr -d ' \n')
+    if [[ $archive_format == 1f8b ]]; then
+        echo "[*] Detected legacy gzip canonical mtree."
+        gzip -dc "$temp_dir/mtree.archive" > "$temp_dir/canonical/mtree.txt"
+    else
+        echo "[*] Detected Apple Archive canonical mtree."
+        /usr/bin/aa extract \
+            -i "$temp_dir/mtree.archive" \
+            -d "$temp_dir/canonical"
+    fi
     python3 modules/ssv/patch_custom_mtree.py \
         "$temp_dir/canonical/mtree.txt" "$metadata"
-    xattr -cr "$temp_dir/canonical" 2>/dev/null || true
-    python3 modules/ssv/repack_aa_exact.py \
-        "$temp_dir/canonical" "$temp_dir/mtree.patched.archive" "$payload_size"
+    if [[ $archive_format == 1f8b ]]; then
+        python3 modules/ssv/repack_gzip_exact.py \
+            "$temp_dir/canonical/mtree.txt" \
+            "$temp_dir/mtree.patched.archive" "$payload_size"
+    else
+        xattr -cr "$temp_dir/canonical" 2>/dev/null || true
+        python3 modules/ssv/repack_aa_exact.py \
+            "$temp_dir/canonical" "$temp_dir/mtree.patched.archive" "$payload_size"
+    fi
 
     cp "$mtree_path" "$temp_dir/mtree.patched.im4p"
     ./bin/img4 \
@@ -968,10 +982,16 @@ ssv_patch_custom_canonical_mtree() {
     ./bin/img4 \
         -i "$temp_dir/mtree.patched.im4p" \
         -o "$temp_dir/mtree.verify.archive"
-    /usr/bin/aa list -i "$temp_dir/mtree.verify.archive" >/dev/null
-    /usr/bin/aa extract \
-        -i "$temp_dir/mtree.verify.archive" \
-        -d "$temp_dir/verify"
+    if [[ $archive_format == 1f8b ]]; then
+        gzip -t "$temp_dir/mtree.verify.archive"
+        gzip -dc "$temp_dir/mtree.verify.archive" \
+            > "$temp_dir/verify/mtree.txt"
+    else
+        /usr/bin/aa list -i "$temp_dir/mtree.verify.archive" >/dev/null
+        /usr/bin/aa extract \
+            -i "$temp_dir/mtree.verify.archive" \
+            -d "$temp_dir/verify"
+    fi
     python3 modules/ssv/patch_custom_mtree.py \
         "$temp_dir/verify/mtree.txt" "$metadata" --verify
     mv "$temp_dir/mtree.patched.im4p" "$mtree_path"
