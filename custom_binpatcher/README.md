@@ -5,7 +5,7 @@ iOS System volume. It validates every expected byte before changing anything,
 combines all operations targeting the same binary, signs each changed binary
 once, creates a backup, and replaces the original file atomically.
 
-Only Python 3 and the tools already bundled with surrealra1n are required.
+Only Python 3 and the tools already bundled with Surrealra1nForge are required.
 
 ## Private patch files
 
@@ -39,7 +39,7 @@ Restore menu → System Patches Config → Custom Binpatches Configurator
 ```
 
 The `Custom Binpatches` master switch and the individual patch switch must both
-be enabled before surrealra1n applies a patch.
+be enabled before Surrealra1nForge applies a patch.
 
 The generated IPSW uses one predictable name:
 
@@ -166,20 +166,20 @@ Useful options:
 
 ## System volume restore workflow
 
-When active custom patches are used, surrealra1n detects the System volume mode
+When active custom patches are used, Surrealra1nForge detects the System volume mode
 from `BuildManifest.plist`, mounts a writable shadow of the System image,
 applies and signs the configured patches, updates StaticTrustCache,
 materializes the modified image, and rebuilds its ASR checksums.
 
-For a sealed System Volume, surrealra1n also updates canonical mtree inode
+For a sealed System Volume, Surrealra1nForge also updates canonical mtree inode
 entries. The sealed workflow requires two restore attempts:
 
 1. the first attempt captures the APFS seal hash and is expected to fail;
-2. start the restore again, keep the existing IPSW, and let surrealra1n update
+2. start the restore again, keep the existing IPSW, and let Surrealra1nForge update
    its root hash metadata before the second attempt.
 
 An unsealed System Volume skips root hash, canonical mtree, and seal-probe
 handling and completes in one restore attempt.
 
-surrealra1n does not rebuild snapshots or root hashes inside Custom Binpatcher
+Surrealra1nForge does not rebuild snapshots or root hashes inside Custom Binpatcher
 itself; those steps remain part of the surrounding sealed System workflow.

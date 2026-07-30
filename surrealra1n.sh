@@ -1,5 +1,8 @@
 #!/bin/bash
-CURRENT_VERSION="v2.0 beta 22"
+PROJECT_NAME="Surrealra1nForge"
+PROJECT_REPOSITORY="https://github.com/sthomsonpl/Surrealra1nForge"
+EXPERIMENTAL_UPDATE_REPOSITORY="$PROJECT_REPOSITORY.git"
+CURRENT_VERSION="v1.0b1"
 
 if [ "$EUID" -eq 0 ]; then
   echo "ERROR: Do not run this script with sudo or as root."
@@ -32,14 +35,14 @@ error_handler() {
     local script_file="${BASH_SOURCE[1]:-$0}"
 
     {
-        echo "[!] surrealra1n has crashed due to an issue"
+        echo "[!] $PROJECT_NAME has crashed due to an issue"
         echo "[!] Exit code: $exit_code"
         echo "[!] Script: $script_file"
         echo "[!] Line: $line_number"
         echo "[!] Failed command: $failed_command"
         echo
         echo "[!] It is recommended to report this issue here:"
-        echo "    https://github.com/pwnerblu/surrealra1n/issues"
+        echo "    $PROJECT_REPOSITORY/issues"
         echo "Here's the recommended way to report this:"
         echo "Title should be a brief and clear summary of the issue you are trying to report"
         echo "Issue description should mention all relevant details to such issue if possible, and also a full terminal log attached."
@@ -58,7 +61,7 @@ error_handler() {
 
 trap 'error_handler $LINENO' ERR
 
-echo "Your surrealra1n version: $CURRENT_VERSION"
+echo "Your $PROJECT_NAME version: $CURRENT_VERSION"
 # Request sudo password upfront
 echo "Enter your user password when prompted to"
 sudo -v || exit 1
@@ -79,11 +82,11 @@ ARCH="$(uname -m)"
 if [[ "$(uname)" == "Darwin" ]]; then
     DISTRO="macOS"
     if [[ "$ARCH" == "arm64" ]]; then
-        echo "You are running surrealra1n on an Apple Silicon Mac."
+        echo "You are running $PROJECT_NAME on an Apple Silicon Mac."
         dist=3
         echo
     elif [[ "$ARCH" == "x86_64" ]]; then
-        echo "You are running surrealra1n on Intel macOS."
+        echo "You are running $PROJECT_NAME on Intel macOS."
         dist=4
         echo
     fi
@@ -142,7 +145,7 @@ if [[ $dist == 3 || $dist == 4 ]]; then
     if [[ "$(printf '%s\n' "10.15" "$macos_ver" | sort -V | head -n1)" == "10.15" ]]; then
         echo "Your macOS version $macos_ver is supported."
     else
-        echo "surrealra1n only supports macOS 10.15 and later."
+        echo "$PROJECT_NAME only supports macOS 10.15 and later."
         exit 1
     fi
 fi
@@ -152,7 +155,7 @@ if [[ $dist == 3 || $dist == 4 ]]; then
     if ! xcode-select -p &>/dev/null; then
         echo "Xcode Command Line Tools are not installed. Installing..."
         xcode-select --install
-        echo "Please re-run surrealra1n after the installation completes."
+        echo "Please re-run $PROJECT_NAME after the installation completes."
         exit 1
     else
         echo "Xcode Command Line Tools are installed."
@@ -350,30 +353,51 @@ require_dir() {
 #
 
 echo "Checking for updates..."
-rm -rf update/latest.txt
-curl -L -o update/latest.txt https://github.com/sthomsonpl/surrealra1n/raw/refs/heads/development/update/latest.txt
-LATEST_VERSION=$(head -n 1 "update/latest.txt" | tr -d '\r\n')
-RELEASE_NOTES=$(awk '/^RELEASE NOTES:/{flag=1; next} flag' "update/latest.txt")
 CURRENT_GIT_BRANCH=$(git branch --show-current 2>/dev/null || true)
 
-if [[ $LATEST_VERSION != $CURRENT_VERSION ]]; then
-    echo "A new version of surrealra1n is available: $LATEST_VERSION"
-    echo "RELEASE NOTES:"
-    echo "$RELEASE_NOTES"
-    echo ""
-    if [[ $CURRENT_GIT_BRANCH == experimental ]]; then
-        echo "[*] Automatic updates are disabled on the experimental branch."
-        echo "[*] To update this branch manually, run:"
-        echo "    git pull --ff-only origin experimental"
-        outdated=1
+if [[ $CURRENT_GIT_BRANCH == experimental ]]; then
+    echo "Checking the experimental branch for new commits..."
+    if git fetch --quiet "$EXPERIMENTAL_UPDATE_REPOSITORY" experimental; then
+        LOCAL_COMMIT=$(git rev-parse HEAD)
+        REMOTE_COMMIT=$(git rev-parse FETCH_HEAD)
+
+        if [[ $LOCAL_COMMIT == "$REMOTE_COMMIT" ]]; then
+            echo "$PROJECT_NAME experimental is up to date."
+            sleep 1
+        elif git merge-base --is-ancestor "$LOCAL_COMMIT" "$REMOTE_COMMIT"; then
+            NEW_COMMIT_COUNT=$(git rev-list --count "$LOCAL_COMMIT..$REMOTE_COMMIT")
+            echo "A new experimental update is available ($NEW_COMMIT_COUNT new commit(s))."
+            echo "To update this branch, run:"
+            echo "    git pull --ff-only --recurse-submodules $EXPERIMENTAL_UPDATE_REPOSITORY experimental"
+            outdated=1
+        elif git merge-base --is-ancestor "$REMOTE_COMMIT" "$LOCAL_COMMIT"; then
+            echo "Your experimental branch contains local commits not yet present in the public repository."
+        else
+            echo "[!] Local and public experimental branches have diverged."
+            echo "[!] Review the branch state with: git status"
+            outdated=1
+        fi
     else
+        echo "[!] Could not check experimental updates. Continuing without an update check."
+    fi
+else
+    rm -rf update/latest.txt
+    curl -L -o update/latest.txt "$PROJECT_REPOSITORY/raw/refs/heads/development/update/latest.txt"
+    LATEST_PROJECT_VERSION=$(head -n 1 "update/latest.txt" | tr -d '\r\n')
+    RELEASE_NOTES=$(awk '/^RELEASE NOTES:/{flag=1; next} flag' "update/latest.txt")
+
+    if [[ $LATEST_PROJECT_VERSION != "$CURRENT_VERSION" ]]; then
+        echo "A new version of $PROJECT_NAME is available: $LATEST_PROJECT_VERSION"
+        echo "RELEASE NOTES:"
+        echo "$RELEASE_NOTES"
+        echo ""
         echo "It is strongly recommended to update to get the latest features + bug fixes."
         read -p "Would you like to update now? (y/n): " update
         if [[ $update == y || $update == Y ]]; then
             rm -rf "updatefiles"
             mkdir updatefiles
             rm -rf "updatefiles/repo"
-            git clone --branch development https://github.com/sthomsonpl/surrealra1n updatefiles/repo --recursive
+            git clone --branch development "$PROJECT_REPOSITORY" updatefiles/repo --recursive
             if [[ ! -d updatefiles/repo ]]; then
                 echo "Failed to clone repository."
                 exit 1
@@ -381,7 +405,7 @@ if [[ $LATEST_VERSION != $CURRENT_VERSION ]]; then
             rm -rf "surrealra1n.old"
             mkdir -p surrealra1n.old # make folder to back up old surrealra1n installation
             echo "$CURRENT_VERSION" > surrealra1n.old/oldversion.txt
-            echo "Backing up your current surrealra1n installation..."
+            echo "Backing up your current $PROJECT_NAME installation..."
             mv -v bin surrealra1n.old/
             mv -v futurerestore surrealra1n.old/
             mv -v keys surrealra1n.old/
@@ -394,7 +418,7 @@ if [[ $LATEST_VERSION != $CURRENT_VERSION ]]; then
             chmod +x surrealra1n.sh
 
             rm -rf "updatefiles"
-            echo "surrealra1n has been updated! Please run the script again"
+            echo "$PROJECT_NAME has been updated! Please run the script again"
             exit 0
         else
             echo "You have declined the update."
@@ -402,10 +426,10 @@ if [[ $LATEST_VERSION != $CURRENT_VERSION ]]; then
             outdated=1
             read -p "Press enter to continue"
         fi
+    else
+        echo "$PROJECT_NAME is up to date."
+        sleep 1
     fi
-else
-    echo "surrealra1n is up to date."
-    sleep 1
 fi
 
 echo "Checking for existing binaries..."
@@ -1228,9 +1252,10 @@ IBSS7="iBSS.$BOARDID.RELEASE.im4p"
 IBEC7="iBEC.$BOARDID.RELEASE.im4p"
 KERNEL10="kernelcache.release.$BOARDID2"
 
-INFO_TEXT="surrealra1n - $CURRENT_VERSION
+INFO_TEXT="$PROJECT_NAME - $CURRENT_VERSION
 Tether Downgrader for some checkm8 64bit devices, iOS 7.0 - 15.8.5
-This build is an early beta. Use at your own risk, and expect bugs.
+Personal fork focused primarily on experimental A12/A13 testing.
+Based on surrealra1n by PWNBlue. Use at your own risk, and expect bugs.
 
 Uses latest SHSH blobs (for tethered downgrades)
 iSuns9 fork of asr64_patcher is used for patching ASR
@@ -1249,11 +1274,11 @@ echo "$INFO_TEXT"
 echo ""
 echo "Options:"
 echo ""
-echo "1. Reinstall surrealra1n"
+echo "1. Reinstall $PROJECT_NAME"
 echo "2. Clear all created boot files and restore files"
 echo "3. Clear downloaded files and caches"
 if [[ -d "surrealra1n.old" ]]; then
-    echo "4. Go back to previous version of surrealra1n"
+    echo "4. Go back to previous version of $PROJECT_NAME"
     echo "5. Back"
 else
     echo "4. Back"
@@ -1264,13 +1289,13 @@ else
     read -p "Please input an option (1-4): " misc_utils_options
 fi
 if [[ $misc_utils_options == 1 ]]; then
-    echo "WARNING: All of your boot files, and other things will be deleted (if any files are in the surrealra1n directory, they will be erased), and surrealra1n will be fresh installed."
-    read -p "Are you sure you want to reinstall surrealra1n? (y/N): " surrealra1n_reinstall
+    echo "WARNING: All boot files and other generated data in this directory will be erased, and $PROJECT_NAME will be freshly installed."
+    read -p "Are you sure you want to reinstall $PROJECT_NAME? (y/N): " surrealra1n_reinstall
     if [[ $surrealra1n_reinstall == Y || $surrealra1n_reinstall == y ]]; then
         sudo rm -rf ./*
-        git clone --branch development https://github.com/sthomsonpl/surrealra1n repo --recursive
+        git clone --branch development "$PROJECT_REPOSITORY" repo --recursive
         if [[ ! -d repo ]]; then
-            echo "Failed to clone repository. You will need to fetch surrealra1n from releases on GitHub"
+            echo "Failed to clone repository. You will need to fetch $PROJECT_NAME from GitHub."
             exit 1
         fi
         echo "Copying new files..."
@@ -1278,10 +1303,10 @@ if [[ $misc_utils_options == 1 ]]; then
         chmod +x surrealra1n.sh
 
         rm -rf "repo"
-        echo "surrealra1n has been reinstalled! Please run the script again"
+        echo "$PROJECT_NAME has been reinstalled! Please run the script again"
         exit 0
     else
-        echo "surrealra1n reinstall has been canceled."
+        echo "$PROJECT_NAME reinstall has been canceled."
         misc_utils
     fi
 elif [[ $misc_utils_options == 2 ]]; then
@@ -1332,8 +1357,8 @@ elif [[ $misc_utils_options == 4 ]] && [[ -d "surrealra1n.old" ]]; then
         misc_utils
         return
     fi
-    echo "WARNING: This will restore surrealra1n to the previous version backed up in surrealra1n.old."
-    echo "Any new features from this surrealra1n release may not exist in the previous version"
+    echo "WARNING: This will restore $PROJECT_NAME to the previous version backed up in surrealra1n.old."
+    echo "Any new features from this $PROJECT_NAME release may not exist in the previous version."
     read -p "Are you sure you want to go back to the previous version? (y/N): " rollback_confirm
     if [[ $rollback_confirm == Y || $rollback_confirm == y ]]; then
         rm -rf "bin"
@@ -1343,7 +1368,7 @@ elif [[ $misc_utils_options == 4 ]] && [[ -d "surrealra1n.old" ]]; then
         cp -av surrealra1n.old/. ./
         chmod +x surrealra1n.sh
         rm -rf "surrealra1n.old"
-        echo "surrealra1n has been restored to the previous version! Please run the script again."
+        echo "$PROJECT_NAME has been restored to the previous version! Please run the script again."
         echo "You can upgrade to the latest version at any time later if you want to be on latest again."
         exit 0
     else
@@ -1363,7 +1388,7 @@ pwn_device(){
 
 if [[ $IDENTIFIER == iPhone6* || $IDENTIFIER == iPad4* ]] && [[ $dist == 1 || $dist == 2 || $dist == 5 ]]; then
     echo "A7 devices may have issues pwning on Linux"
-    echo "If you have a MacBook, use surrealra1n on that instead"
+    echo "If you have a MacBook, use $PROJECT_NAME on that instead"
     echo "You may choose to continue attempting to pwn with Linux"
     read -p "Press enter to continue"
 fi
@@ -1447,12 +1472,12 @@ fi
 
 switch_to_main(){
 
-echo "Fetching latest stable version info..."
-curl -L -o update/latest_main.txt https://github.com/sthomsonpl/surrealra1n/raw/refs/heads/main/update/latest.txt
+echo "Fetching latest development release info..."
+curl -L -o update/latest_main.txt "$PROJECT_REPOSITORY/raw/refs/heads/development/update/latest.txt"
 MAIN_VERSION=$(head -n 1 "update/latest_main.txt" | tr -d '\r\n')
 
-CURRENT_CLEAN=$(echo "$CURRENT_VERSION" | sed 's/ beta//g' | sed 's/ .*//g' | tr -d 'v')
-MAIN_CLEAN=$(echo "$MAIN_VERSION" | sed 's/ beta//g' | sed 's/ .*//g' | tr -d 'v')
+CURRENT_CLEAN=$(echo "$CURRENT_VERSION" | sed -E 's/^v//; s/ beta[[:space:]]*/./; s/b([0-9]+)$/.\1/; s/[^0-9.].*$//')
+MAIN_CLEAN=$(echo "$MAIN_VERSION" | sed -E 's/^v//; s/ beta[[:space:]]*/./; s/b([0-9]+)$/.\1/; s/[^0-9.].*$//')
 
 CURRENT_MAJOR=$(echo "$CURRENT_CLEAN" | cut -d'.' -f1)
 CURRENT_MINOR=$(echo "$CURRENT_CLEAN" | cut -d'.' -f2)
@@ -1465,11 +1490,11 @@ MAIN_PATCH=$(echo "$MAIN_CLEAN" | cut -d'.' -f3)
 MAIN_PATCH=${MAIN_PATCH:-0}
 
 echo "Current version: $CURRENT_VERSION"
-echo "Latest stable version: $MAIN_VERSION"
+echo "Latest development version: $MAIN_VERSION"
 echo ""
 
 if [[ "$CURRENT_MAJOR" == "$MAIN_MAJOR" && "$CURRENT_MINOR" == "$MAIN_MINOR" && "$CURRENT_PATCH" == "$MAIN_PATCH" ]]; then
-    echo "You are already on the stable equivalent of your current version ($MAIN_VERSION)."
+    echo "You are already on the development equivalent of your current version ($MAIN_VERSION)."
     echo "No action needed."
     read -p "Press enter to go back"
     main_menu
@@ -1478,15 +1503,15 @@ fi
 
 if [[ "$CURRENT_MAJOR" -gt "$MAIN_MAJOR" ]] || \
    [[ "$CURRENT_MAJOR" -eq "$MAIN_MAJOR" && "$CURRENT_MINOR" -gt "$MAIN_MINOR" ]]; then
-    echo "WARNING: You are currently on $CURRENT_VERSION (development branch)."
-    echo "The latest stable version is $MAIN_VERSION (main branch)."
-    echo "Since your development version is newer than stable, switching will require a clean reinstall."
+    echo "WARNING: You are currently on $CURRENT_VERSION (experimental branch)."
+    echo "The latest development version is $MAIN_VERSION."
+    echo "Since your experimental version is newer, switching will require a clean reinstall."
     echo "This means ALL boot files, restore files, and binaries will be deleted."
     echo ""
-    read -p "Are you sure you want to switch to stable? (y/N): " switch_confirm
+    read -p "Are you sure you want to switch to development? (y/N): " switch_confirm
     if [[ $switch_confirm == Y || $switch_confirm == y ]]; then
         sudo rm -rf ./*
-        git clone --branch main https://github.com/sthomsonpl/surrealra1n repo --recursive
+        git clone --branch development "$PROJECT_REPOSITORY" repo --recursive
         if [[ ! -d repo ]]; then
             echo "Failed to clone repository."
             exit 1
@@ -1495,28 +1520,28 @@ if [[ "$CURRENT_MAJOR" -gt "$MAIN_MAJOR" ]] || \
         cp -av repo/. ./
         chmod +x surrealra1n.sh
         rm -rf "repo"
-        echo "surrealra1n has been switched to stable $MAIN_VERSION! Please run the script again."
+        echo "$PROJECT_NAME has been switched to development $MAIN_VERSION! Please run the script again."
         exit 0
     else
-        echo "Switch to stable has been canceled."
+        echo "Switch to development has been canceled."
         main_menu
     fi
 else
-    echo "You are on $CURRENT_VERSION (development branch)."
-    echo "Latest stable version is $MAIN_VERSION (main branch)."
-    echo "This will upgrade you to stable without wiping your boot/restore files."
+    echo "You are on $CURRENT_VERSION (experimental branch)."
+    echo "Latest development version is $MAIN_VERSION."
+    echo "This will switch you to development without wiping your boot/restore files."
     echo ""
-    read -p "Would you like to switch to stable? (y/N): " switch_confirm
+    read -p "Would you like to switch to development? (y/N): " switch_confirm
     if [[ $switch_confirm == Y || $switch_confirm == y ]]; then
         rm -rf "surrealra1n.old"
         mkdir -p surrealra1n.old
-        echo "Backing up your current surrealra1n installation..."
+        echo "Backing up your current $PROJECT_NAME installation..."
         echo "$CURRENT_VERSION" > surrealra1n.old/oldversion.txt
         mv -v bin surrealra1n.old/
         mv -v futurerestore surrealra1n.old/
         mv -v keys surrealra1n.old/
         mv -v surrealra1n.sh surrealra1n.old/
-        git clone --branch main https://github.com/sthomsonpl/surrealra1n repo --recursive
+        git clone --branch development "$PROJECT_REPOSITORY" repo --recursive
         if [[ ! -d repo ]]; then
             echo "Failed to clone repository."
             exit 1
@@ -1525,10 +1550,10 @@ else
         cp -av repo/. ./
         chmod +x surrealra1n.sh
         rm -rf "repo"
-        echo "surrealra1n has been switched to stable $MAIN_VERSION! Please run the script again."
+        echo "$PROJECT_NAME has been switched to development $MAIN_VERSION! Please run the script again."
         exit 0
     else
-        echo "Switch to stable has been canceled."
+        echo "Switch to development has been canceled."
         main_menu
     fi
 fi
@@ -2600,7 +2625,7 @@ elif [[ $IDENTIFIER == iPhone10* ]] && [[ $VERSION == 16.6* ]]; then
 fi
 
 if [[ $IDENTIFIER == iPad5,3 || $IDENTIFIER == iPad5,4 ]] && [[ $VERSION == 11.* || $VERSION == 12.* ]]; then
-    echo "11.3-12.4.1 downgrades are supported but they have not been integrated yet into surrealra1n $CURRENT_VERSION"
+    echo "11.3-12.4.1 downgrades are supported but they have not been integrated yet into $PROJECT_NAME $CURRENT_VERSION"
     exit 1
 fi
 
@@ -3077,7 +3102,7 @@ echo "4. Battery life may be affected on iOS 7/8, because we use a workaround th
 echo "5. Potentially other broken features"
 read -p "Press enter to continue"
 if [[ $IDENTIFIER == iPhone7* || $IDENTIFIER == iPad5* || $IDENTIFIER == iPod7* ]]; then
-    echo "A8 is currently unsupported as we are rewriting surrealra1n, but it should be back eventually."
+    echo "A8 is currently unsupported while $PROJECT_NAME is being reworked, but it should return eventually."
     exit 1
 fi
 
@@ -3175,7 +3200,7 @@ elif [[ $tether_options == 3 ]]; then
         do_tethered_restore_a12_a13
     elif [[ $VERSION == 7.* || $VERSION == 8.* || $VERSION == 9.* ]]; then
         if [[ $VERSION == 8.* ]]; then
-            echo "seprmvr64 restores to 8.x are not supported in surrealra1n"
+            echo "seprmvr64 restores to 8.x are not supported in $PROJECT_NAME"
             exit 1
         elif [[ $VERSION == 7.* ]]; then
             read -p "Would you like to jailbreak as part of this restore? (Y/n): " jailbreak_choice
@@ -3318,7 +3343,7 @@ fi
 clear 
 echo "$INFO_TEXT"
 if [[ $outdated == 1 ]]; then
-    echo "[!] A newer surrealra1n version is available."
+    echo "[!] A newer $PROJECT_NAME version is available."
     echo "[!] Continuing without updating; some features may be outdated."
 fi
 echo ""
@@ -3356,7 +3381,7 @@ echo "Options:"
 echo ""
 echo "1. Downgrade Options"
 echo "2. Misc Utilities"
-echo "3. Switch to main branch"
+echo "3. Switch to development branch"
 echo "4. Exit"
 read -p "Please input an option (1-4): " option
 if [[ $option == 1 ]]; then
@@ -3366,7 +3391,7 @@ elif [[ $option == 2 ]]; then
 elif [[ $option == 3 ]]; then
     switch_to_main
 elif [[ $option == 4 ]]; then
-    echo "surrealra1n is exiting"
+    echo "$PROJECT_NAME is exiting"
     exit 0
 else
     echo "Invalid option. Exiting."

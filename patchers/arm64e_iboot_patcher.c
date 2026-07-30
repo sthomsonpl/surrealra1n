@@ -267,7 +267,7 @@ int main(int argc, char *argv[])
     uint8_t *buf;
     size_t len;
 
-    printf("surrealra1n arm64e iBoot signature patcher\n");
+    printf("Surrealra1nForge arm64e iBoot signature patcher\n");
 
     if (argc != 3) {
         printf("usage: %s <iBoot.in> <iBoot.patched>\n", argv[0]);
