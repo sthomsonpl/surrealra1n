@@ -262,7 +262,8 @@ ssv_current_ipsw_fingerprint() {
     python3 - "$IDENTIFIER" "$VERSION" "$BUILD" \
         "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_active" \
         "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" \
-        "$SYSTEM_VOLUME_MODE" <<'PY'
+        "$SYSTEM_VOLUME_MODE" \
+        "$SCRIPT_DIR/patchers/arm64e_iboot_patcher.c" <<'PY'
 import glob
 import hashlib
 import json
@@ -279,6 +280,7 @@ import sys
     config_path,
     patch_dir,
     volume_mode,
+    arm64e_iboot_patcher_path,
 ) = sys.argv[1:]
 
 enabled_definitions = {}
@@ -296,6 +298,9 @@ if custom_active == "1":
         if patch.get("id") in enabled_ids:
             enabled_definitions[patch["id"]] = patch
 
+with open(arm64e_iboot_patcher_path, "rb") as source:
+    arm64e_iboot_patcher_hash = hashlib.sha256(source.read()).hexdigest()
+
 state = {
     "identifier": identifier,
     "ios": ios,
@@ -304,6 +309,7 @@ state = {
     "skip_setup": skip_setup == "1",
     "dropbear_sshd": sshd == "1",
     "custom_binpatches": enabled_definitions,
+    "arm64e_iboot_patcher": arm64e_iboot_patcher_hash,
 }
 serialized = json.dumps(
     state, sort_keys=True, separators=(",", ":"), ensure_ascii=True

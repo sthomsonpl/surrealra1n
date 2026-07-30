@@ -412,6 +412,14 @@ echo "Checking for existing binaries..."
 
 #!/bin/bash
 
+mkdir -p bin
+if [[ ! -x "./bin/iBootPatch" || \
+      "patchers/arm64e_iboot_patcher.c" -nt "./bin/iBootPatch" ]]; then
+    echo "Building arm64e iBoot signature patcher..."
+    gcc -std=c11 -O2 -Wall -Wextra \
+        patchers/arm64e_iboot_patcher.c -o bin/iBootPatch
+fi
+
 # Check if all required binaries exist
 if [[ -f "./bin/img4" && \
       -f "./bin/img4tool" && \
@@ -425,6 +433,7 @@ if [[ -f "./bin/img4" && \
       -f "./bin/dmg" && \
       -f "./bin/pzb" && \
       -f "./bin/zenity" && \
+      -x "./bin/iBootPatch" && \
       -f "./bin/iBoot64Patcher" && \
       -f "./bin/asr64_patcher" && \
       -f "./bin/ipx_restored_patcher" && \
@@ -461,10 +470,6 @@ elif [[ $dist == 3 ]]; then
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Darwin/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/hfsplus
     curl -L -o bin/zenity https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/zenity
-    # iboot patcher oops
-    curl -L -o ibootpatch.c https://gist.githubusercontent.com/pwnerblu/c759c0060b5167a411b3b3adfcd07572/raw/fd2e870d832ea59c31a54377370ad469f70e6499/patch.c
-    gcc ibootpatch.c -o bin/iBootPatch
-    rm -rf ibootpatch.c
     # from spironolactone oops
     curl -L -o bin/trustcache https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/trustcache
     curl -L -o bin/iBoot64Patcher2 https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/iBoot64Patcher_cryptic
@@ -562,10 +567,6 @@ elif [[ $dist == 4 ]]; then
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Darwin/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/hfsplus
     curl -L -o bin/zenity https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/zenity
-    # iboot patcher oops
-    curl -L -o ibootpatch.c https://gist.githubusercontent.com/pwnerblu/c759c0060b5167a411b3b3adfcd07572/raw/fd2e870d832ea59c31a54377370ad469f70e6499/patch.c
-    gcc ibootpatch.c -o bin/iBootPatch
-    rm -rf ibootpatch.c
     # from spironolactone oops
     curl -L -o bin/trustcache https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/trustcache
     curl -L -o bin/iBoot64Patcher2 https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/iBoot64Patcher_cryptic
@@ -663,10 +664,6 @@ else
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Linux/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Linux/hfsplus
     # sshpass
-    # iboot patcher oops
-    curl -L -o ibootpatch.c https://gist.githubusercontent.com/pwnerblu/c759c0060b5167a411b3b3adfcd07572/raw/fd2e870d832ea59c31a54377370ad469f70e6499/patch.c
-    gcc ibootpatch.c -o bin/iBootPatch
-    rm -rf ibootpatch.c
     curl -L -o bin/trustcache https://github.com/CRKatri/trustcache/releases/download/v2.0/trustcache_linux_x86_64
     # fetch pwnerblu fork of Kernel64Patcher and iBootpatch2 for tether booting iOS 14.x on A12 device.
     git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
@@ -2126,7 +2123,9 @@ unzip "$IPSW_PATH" -d tmp1
 unzip "$IPSW_PATH_LATEST" -d tmp2
 mkdir -p work
 # iBSS patching of course because yes
-if [[ $VERSION == 14.0 ]] && [[ $BUILD != 18A373 ]]; then
+# iPhone 11 Pro/Pro Max use their target iBSS and matching per-version key.
+if [[ $VERSION == 14.0 ]] && [[ $BUILD != 18A373 ]] && \
+        [[ $IDENTIFIER != iPhone12,3 && $IDENTIFIER != iPhone12,5 ]]; then
     if [[ $IDENTIFIER == iPhone11,8 ]]; then
         ipsw_url="https://updates.cdn-apple.com/2020SummerFCS/fullrestores/001-46828/6A00C15C-8AEB-490E-A468-04E28C68E7C9/iPhone11,8,iPhone12,1_14.0_18A373_Restore.ipsw"
     elif [[ $IDENTIFIER == iPhone11,2 || $IDENTIFIER == iPhone11,4 || $IDENTIFIER == iPhone11,6 ]]; then
@@ -2142,7 +2141,8 @@ if [[ $VERSION == 14.0 ]] && [[ $BUILD != 18A373 ]]; then
     ./bin/iBoot64Patcher2 work/iBSS.raw work/iBSS.patchboot -b "-v"
     ./bin/iBootpatch2 work/iBSS.patchboot boot/$IDENTIFIER/$VERSION/iBSS.boot
     ./bin/img4 -i boot/$IDENTIFIER/iBSS.patch -o tmp2/Firmware/dfu/$IBEC -A -T ibec
-elif [[ $VERSION == 14.5* || $VERSION == 14.6* || $VERSION == 14.7* || $VERSION == 14.8* ]]; then
+elif [[ $VERSION == 14.5* || $VERSION == 14.6* || $VERSION == 14.7* || $VERSION == 14.8* ]] && \
+        [[ $IDENTIFIER != iPhone12,3 && $IDENTIFIER != iPhone12,5 ]]; then
     if [[ $IDENTIFIER == iPhone11,8 ]]; then
         ipsw_url="https://updates.cdn-apple.com/2021WinterFCS/fullrestores/071-22451/5C8BBEE0-8471-4801-8D85-54D33DEDA50D/iPhone11,8,iPhone12,1_14.4.2_18D70_Restore.ipsw"
     elif [[ $IDENTIFIER == iPhone11,2 || $IDENTIFIER == iPhone11,4 || $IDENTIFIER == iPhone11,6 ]]; then
@@ -2156,6 +2156,13 @@ elif [[ $VERSION == 14.5* || $VERSION == 14.6* || $VERSION == 14.7* || $VERSION 
     ./bin/img4 -i work/$IBSS -o work/iBSS.raw -k $IBSS_KEY
     ./bin/iBoot64Patcher2 work/iBSS.raw boot/$IDENTIFIER/iBSS.patch 
     ./bin/iBoot64Patcher2 work/iBSS.raw work/iBSS.patchboot -b "-v"
+    ./bin/iBootpatch2 work/iBSS.patchboot boot/$IDENTIFIER/$VERSION/iBSS.boot
+    ./bin/img4 -i boot/$IDENTIFIER/iBSS.patch -o tmp2/Firmware/dfu/$IBEC -A -T ibec
+elif [[ $VERSION == 14.* ]] && \
+        [[ $IDENTIFIER == iPhone12,3 || $IDENTIFIER == iPhone12,5 ]]; then
+    ./bin/img4 -i tmp1/Firmware/dfu/$IBSS -o work/iBSS.raw -k $IBSS_KEY
+    ./bin/iBootPatch work/iBSS.raw boot/$IDENTIFIER/iBSS.patch
+    ./bin/iBootPatch work/iBSS.raw work/iBSS.patchboot
     ./bin/iBootpatch2 work/iBSS.patchboot boot/$IDENTIFIER/$VERSION/iBSS.boot
     ./bin/img4 -i boot/$IDENTIFIER/iBSS.patch -o tmp2/Firmware/dfu/$IBEC -A -T ibec
 elif [[ $VERSION == 15.* ]]; then
@@ -2719,6 +2726,8 @@ exit 0
 
 do_tethered_restore_a12_a13(){
 
+local experimental_tool
+
 # fix issue on Linux
 if [[ $dist == 3 || $dist == 4 ]]; then
     if [[ $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
@@ -2779,11 +2788,36 @@ elif [[ $VERSION == 13.* ]] && [[ $IDENTIFIER == iPhone12* ]]; then
 fi
 
 if [[ $IDENTIFIER == iPhone12* ]] && [[ $VERSION == 14.* ]]; then
-    echo "iOS 14 downgrades on A13 are not supported at the moment"
-    exit 1
+    case "$IDENTIFIER" in
+        iPhone12,3|iPhone12,5)
+            for experimental_tool in \
+                    ./bin/iBootPatch ./bin/iBootpatch2 ./bin/Kernel64Patcher3; do
+                if [[ ! -x "$experimental_tool" ]]; then
+                    echo "Missing required experimental patcher: $experimental_tool"
+                    exit 1
+                fi
+            done
+            echo "Experimental iOS 14 support for iPhone 11 Pro/11 Pro Max."
+            echo "Rose is very likely incompatible."
+            echo "The restore may fail or leave the device unable to boot after an incomplete restore."
+            read -p "Are you sure you want to continue? (y/N): " confirm_full
+            if [[ $confirm_full == y || $confirm_full == Y ]]; then
+                echo "Proceeding with experimental iOS 14 support."
+                echo "If the restore fails, please send full logs."
+                sleep 4
+            else
+                echo "Not proceeding"
+                exit 1
+            fi
+            ;;
+        *)
+            echo "iOS 14 downgrades on this A13 device are not supported at the moment"
+            exit 1
+            ;;
+    esac
 fi
 
-if [[ $VERSION == 13.* || $VERSION == 14.* ]] && [[ $IDENTIFIER == iPhone12* ]] && [[ $IDENTIFIER != iPhone12,8 ]]; then
+if [[ $VERSION == 13.* ]] && [[ $IDENTIFIER == iPhone12* ]] && [[ $IDENTIFIER != iPhone12,8 ]]; then
     echo "Rose is very likely incompatible"
     echo "Not continuing."
     exit 1
