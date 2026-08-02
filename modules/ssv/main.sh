@@ -661,7 +661,7 @@ ssv_toggle_ssh(){
         SSV_CONFIG_SSHD=1
         echo "[*] Experimental System SSH patches: ON"
         echo "[!] Device and iOS compatibility is not guaranteed."
-        echo "[!] This customization requires two restore attempts."
+        echo "[!] Sealed System Volumes on iOS 15+ require two restore attempts."
         echo "[!] The first pass captures the root hash; the second completes the restore."
         echo "[!] Development credentials enabled: root / alpine"
         echo "[*] USB access after boot: ./bin/iproxy 2222 22"
@@ -678,7 +678,7 @@ ssv_toggle_custom_binpatches() {
     else
         SSV_CONFIG_CUSTOM_BINPATCHES=1
         echo "[*] Custom Binpatches: ON"
-        echo "[!] Sealed System Volumes require two restore attempts."
+        echo "[!] Sealed System Volumes on iOS 15+ require two restore attempts."
         echo "[*] Unsealed System Volumes are patched in a single restore."
         echo "[!] Use option 4 to choose the individual patches."
     fi
@@ -721,7 +721,7 @@ ssv_validate_custom_binpatches() {
 }
 
 ssv_requires_seal_sync() {
-    [[ $SYSTEM_VOLUME_MODE == sealed ]] || return 1
+    ssv_ios15_features_are_supported || return 1
     [[ $SSHD_DEV -eq 1 ]] || ssv_custom_binpatches_are_active
 }
 

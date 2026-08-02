@@ -1,7 +1,6 @@
-v1.0b1
+v1.0b2
 
 RELEASE NOTES:
 
-Initial Surrealra1nForge beta.
-Introduce independent Forge versioning and project branding.
-Focus development on experimental A12 and A13 testing workflows.
+-Use two-pass restores for iOS 15+ sealed System Volumes.
+-Use single-pass restores for older iOS versions.
