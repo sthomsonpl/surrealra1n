@@ -1,0 +1,16 @@
+Source: https://dropbear.nl/mirror/releases/dropbear-2020.81.tar.bz2
+SHA-256: 48235d10b37775dbda59341ac0c4b239b82ad6318c31568b985730c788aac53b
+
+Apply dropbear-rootless-shells.patch with -p1, then configure for
+arm-apple-darwin with an iPhoneOS deployment target of 15.0. The Procursus
+compatibility mappings used by the bundled binary are:
+
+  getpwnam=ie_getpwnam
+  getpwuid=ie_getpwuid
+  getgrnam=ie_getgrnam
+  execv=ie_execv
+
+Link against libiosexec.1.dylib and libcrypt.2.dylib, set an LC_RPATH of
+/var/jb/usr/lib, enable dead stripping, and build PROGRAMS=dropbear. The final
+binary carries the same platform-application, no-container, and
+skip-library-validation entitlements as the Procursus package binary.

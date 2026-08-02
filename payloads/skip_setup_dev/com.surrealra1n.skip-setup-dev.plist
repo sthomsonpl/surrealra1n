@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>EnablePressuredExit</key>
+    <false/>
+    <key>Label</key>
+    <string>com.surrealra1n.skip-setup-dev</string>
+    <key>POSIXSpawnType</key>
+    <string>Interactive</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/surrealra1n_skip_setup_dev</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>/dev/console</string>
+    <key>StandardOutPath</key>
+    <string>/dev/console</string>
+    <key>Umask</key>
+    <integer>0</integer>
+</dict>
+</plist>

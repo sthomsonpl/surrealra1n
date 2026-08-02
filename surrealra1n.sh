@@ -1,5 +1,8 @@
 #!/bin/bash
-CURRENT_VERSION="v2.0 beta 15"
+PROJECT_NAME="Surrealra1nForge"
+PROJECT_REPOSITORY="https://github.com/sthomsonpl/Surrealra1nForge"
+EXPERIMENTAL_UPDATE_REPOSITORY="$PROJECT_REPOSITORY.git"
+CURRENT_VERSION="v1.0b1"
 
 if [ "$EUID" -eq 0 ]; then
   echo "ERROR: Do not run this script with sudo or as root."
@@ -23,6 +26,8 @@ outdated=""
 
 set -euo pipefail
 
+source "$SCRIPT_DIR/modules/ssv/main.sh"
+
 error_handler() {
     local exit_code=$?
     local failed_command="$BASH_COMMAND"
@@ -30,14 +35,14 @@ error_handler() {
     local script_file="${BASH_SOURCE[1]:-$0}"
 
     {
-        echo "[!] surrealra1n has crashed due to an issue"
+        echo "[!] $PROJECT_NAME has crashed due to an issue"
         echo "[!] Exit code: $exit_code"
         echo "[!] Script: $script_file"
         echo "[!] Line: $line_number"
         echo "[!] Failed command: $failed_command"
         echo
         echo "[!] It is recommended to report this issue here:"
-        echo "    https://github.com/pwnerblu/surrealra1n/issues"
+        echo "    $PROJECT_REPOSITORY/issues"
         echo "Here's the recommended way to report this:"
         echo "Title should be a brief and clear summary of the issue you are trying to report"
         echo "Issue description should mention all relevant details to such issue if possible, and also a full terminal log attached."
@@ -56,7 +61,7 @@ error_handler() {
 
 trap 'error_handler $LINENO' ERR
 
-echo "Your surrealra1n version: $CURRENT_VERSION"
+echo "Your $PROJECT_NAME version: $CURRENT_VERSION"
 # Request sudo password upfront
 echo "Enter your user password when prompted to"
 sudo -v || exit 1
@@ -77,11 +82,11 @@ ARCH="$(uname -m)"
 if [[ "$(uname)" == "Darwin" ]]; then
     DISTRO="macOS"
     if [[ "$ARCH" == "arm64" ]]; then
-        echo "You are running surrealra1n on an Apple Silicon Mac."
+        echo "You are running $PROJECT_NAME on an Apple Silicon Mac."
         dist=3
         echo
     elif [[ "$ARCH" == "x86_64" ]]; then
-        echo "You are running surrealra1n on Intel macOS."
+        echo "You are running $PROJECT_NAME on Intel macOS."
         dist=4
         echo
     fi
@@ -140,7 +145,7 @@ if [[ $dist == 3 || $dist == 4 ]]; then
     if [[ "$(printf '%s\n' "10.15" "$macos_ver" | sort -V | head -n1)" == "10.15" ]]; then
         echo "Your macOS version $macos_ver is supported."
     else
-        echo "surrealra1n only supports macOS 10.15 and later."
+        echo "$PROJECT_NAME only supports macOS 10.15 and later."
         exit 1
     fi
 fi
@@ -150,7 +155,7 @@ if [[ $dist == 3 || $dist == 4 ]]; then
     if ! xcode-select -p &>/dev/null; then
         echo "Xcode Command Line Tools are not installed. Installing..."
         xcode-select --install
-        echo "Please re-run surrealra1n after the installation completes."
+        echo "Please re-run $PROJECT_NAME after the installation completes."
         exit 1
     else
         echo "Xcode Command Line Tools are installed."
@@ -202,12 +207,21 @@ else
     zenity="zenity"
 fi
 
+pick_file() {
+    local p
+    p=$($zenity --file-selection --title="$1" 2>/dev/null)
+    if [[ -z "$p" ]]; then
+        read -e -r -p "$1 - enter absolute path (blank to cancel): " p </dev/tty
+    fi
+    echo "$p"
+}
+
 
 # Dependency check
 echo "Checking for required dependencies..."
 
 if [[ $dist == 1 ]]; then
-    DEPENDENCIES=(libusb-1.0-0-dev libusbmuxd-tools libimobiledevice-utils usbmuxd zenity git curl make gcc)
+    DEPENDENCIES=(libusb-1.0-0-dev libusbmuxd-tools libimobiledevice-utils usbmuxd zenity git curl make gcc python3-pip python3-usb)
     MISSING_PACKAGES=()
 
     for pkg in "${DEPENDENCIES[@]}"; do
@@ -225,7 +239,7 @@ if [[ $dist == 1 ]]; then
         echo "All dependencies are installed." 
     fi
 elif [[ $dist == 2 ]]; then
-    DEPENDENCIES=(libusb libusbmuxd libimobiledevice usbmuxd zenity git curl make gcc base-devel)
+    DEPENDENCIES=(libusb libusbmuxd libimobiledevice usbmuxd zenity git curl make gcc base-devel python-pip)
     MISSING_PACKAGES=()
 
 
@@ -243,7 +257,7 @@ elif [[ $dist == 2 ]]; then
         echo "All dependencies are already installed."
     fi
 elif [[ $dist == 5 ]]; then
-    DEPENDENCIES=(libusb1-devel usbmuxd libimobiledevice-utils zenity git curl make gcc)
+    DEPENDENCIES=(libusb1-devel usbmuxd libimobiledevice-utils zenity git curl make gcc python3-pip python3-pyusb)
     MISSING_PACKAGES=()
 
     for pkg in "${DEPENDENCIES[@]}"; do
@@ -264,6 +278,8 @@ elif [[ "$DISTRO" == "unknown" ]]; then
     echo "This script only supports Debian-based, Arch-based, Fedora-based and macOS systems."
     exit 1
 fi
+
+ssv_load_config
 
 #
 stat_size() {
@@ -337,59 +353,96 @@ require_dir() {
 #
 
 echo "Checking for updates..."
-rm -rf update/latest.txt
-curl -L -o update/latest.txt https://github.com/sthomsonpl/surrealra1n/raw/refs/heads/development/update/latest.txt
-LATEST_VERSION=$(head -n 1 "update/latest.txt" | tr -d '\r\n')
-RELEASE_NOTES=$(awk '/^RELEASE NOTES:/{flag=1; next} flag' "update/latest.txt")
+CURRENT_GIT_BRANCH=$(git branch --show-current 2>/dev/null || true)
 
-if [[ $LATEST_VERSION != $CURRENT_VERSION ]]; then
-    echo "A new version of surrealra1n is available: $LATEST_VERSION"
-    echo "RELEASE NOTES:"
-    echo "$RELEASE_NOTES"
-    echo ""
-    echo "It is strongly recommended to update to get the latest features + bug fixes."
-    read -p "Would you like to update now? (y/n): " update
-    if [[ $update == y || $update == Y ]]; then
-        rm -rf "updatefiles"
-        mkdir updatefiles
-        rm -rf "updatefiles/repo"
-        git clone --branch development https://github.com/sthomsonpl/surrealra1n updatefiles/repo --recursive
-        if [[ ! -d updatefiles/repo ]]; then
-            echo "Failed to clone repository."
-            exit 1
+if [[ $CURRENT_GIT_BRANCH == experimental ]]; then
+    echo "Checking the experimental branch for new commits..."
+    if git fetch --quiet "$EXPERIMENTAL_UPDATE_REPOSITORY" experimental; then
+        LOCAL_COMMIT=$(git rev-parse HEAD)
+        REMOTE_COMMIT=$(git rev-parse FETCH_HEAD)
+
+        if [[ $LOCAL_COMMIT == "$REMOTE_COMMIT" ]]; then
+            echo "$PROJECT_NAME experimental is up to date."
+            sleep 1
+        elif git merge-base --is-ancestor "$LOCAL_COMMIT" "$REMOTE_COMMIT"; then
+            NEW_COMMIT_COUNT=$(git rev-list --count "$LOCAL_COMMIT..$REMOTE_COMMIT")
+            echo "A new experimental update is available ($NEW_COMMIT_COUNT new commit(s))."
+            echo "To update this branch, run:"
+            echo "    git pull --ff-only --recurse-submodules $EXPERIMENTAL_UPDATE_REPOSITORY experimental"
+            outdated=1
+        elif git merge-base --is-ancestor "$REMOTE_COMMIT" "$LOCAL_COMMIT"; then
+            echo "Your experimental branch contains local commits not yet present in the public repository."
+        else
+            echo "[!] Local and public experimental branches have diverged."
+            echo "[!] Review the branch state with: git status"
+            outdated=1
         fi
-        rm -rf "surrealra1n.old"
-        mkdir -p surrealra1n.old # make folder to back up old surrealra1n installation
-        echo "$CURRENT_VERSION" > surrealra1n.old/oldversion.txt
-        echo "Backing up your current surrealra1n installation..."
-        mv -v bin surrealra1n.old/
-        mv -v futurerestore surrealra1n.old/
-        mv -v keys surrealra1n.old/
-        mv -v surrealra1n.sh surrealra1n.old/
-        rm -rf "bin"
-        rm -rf "futurerestore"
-        rm -rf "keys"
-        echo "Copying new files..."
-        cp -av updatefiles/repo/. ./
-        chmod +x surrealra1n.sh
-
-        rm -rf "updatefiles"
-        echo "surrealra1n has been updated! Please run the script again"
-        exit 0
     else
-        echo "You have declined the update."
-        echo "This version of surrealra1n is no longer supported, so it is recommended to update as soon as possible."
-        outdated=1
-        read -p "Press enter to continue"
+        echo "[!] Could not check experimental updates. Continuing without an update check."
     fi
 else
-    echo "surrealra1n is up to date."
-    sleep 1
+    rm -rf update/latest.txt
+    curl -L -o update/latest.txt "$PROJECT_REPOSITORY/raw/refs/heads/development/update/latest.txt"
+    LATEST_PROJECT_VERSION=$(head -n 1 "update/latest.txt" | tr -d '\r\n')
+    RELEASE_NOTES=$(awk '/^RELEASE NOTES:/{flag=1; next} flag' "update/latest.txt")
+
+    if [[ $LATEST_PROJECT_VERSION != "$CURRENT_VERSION" ]]; then
+        echo "A new version of $PROJECT_NAME is available: $LATEST_PROJECT_VERSION"
+        echo "RELEASE NOTES:"
+        echo "$RELEASE_NOTES"
+        echo ""
+        echo "It is strongly recommended to update to get the latest features + bug fixes."
+        read -p "Would you like to update now? (y/n): " update
+        if [[ $update == y || $update == Y ]]; then
+            rm -rf "updatefiles"
+            mkdir updatefiles
+            rm -rf "updatefiles/repo"
+            git clone --branch development "$PROJECT_REPOSITORY" updatefiles/repo --recursive
+            if [[ ! -d updatefiles/repo ]]; then
+                echo "Failed to clone repository."
+                exit 1
+            fi
+            rm -rf "surrealra1n.old"
+            mkdir -p surrealra1n.old # make folder to back up old surrealra1n installation
+            echo "$CURRENT_VERSION" > surrealra1n.old/oldversion.txt
+            echo "Backing up your current $PROJECT_NAME installation..."
+            mv -v bin surrealra1n.old/
+            mv -v futurerestore surrealra1n.old/
+            mv -v keys surrealra1n.old/
+            mv -v surrealra1n.sh surrealra1n.old/
+            rm -rf "bin"
+            rm -rf "futurerestore"
+            rm -rf "keys"
+            echo "Copying new files..."
+            cp -av updatefiles/repo/. ./
+            chmod +x surrealra1n.sh
+
+            rm -rf "updatefiles"
+            echo "$PROJECT_NAME has been updated! Please run the script again"
+            exit 0
+        else
+            echo "You have declined the update."
+            echo "Continuing without the update. Some features may be outdated."
+            outdated=1
+            read -p "Press enter to continue"
+        fi
+    else
+        echo "$PROJECT_NAME is up to date."
+        sleep 1
+    fi
 fi
 
 echo "Checking for existing binaries..."
 
 #!/bin/bash
+
+mkdir -p bin
+if [[ ! -x "./bin/iBootPatch" || \
+      "patchers/arm64e_iboot_patcher.c" -nt "./bin/iBootPatch" ]]; then
+    echo "Building arm64e iBoot signature patcher..."
+    gcc -std=c11 -O2 -Wall -Wextra \
+        patchers/arm64e_iboot_patcher.c -o bin/iBootPatch
+fi
 
 # Check if all required binaries exist
 if [[ -f "./bin/img4" && \
@@ -404,6 +457,7 @@ if [[ -f "./bin/img4" && \
       -f "./bin/dmg" && \
       -f "./bin/pzb" && \
       -f "./bin/zenity" && \
+      -x "./bin/iBootPatch" && \
       -f "./bin/iBoot64Patcher" && \
       -f "./bin/asr64_patcher" && \
       -f "./bin/ipx_restored_patcher" && \
@@ -440,10 +494,6 @@ elif [[ $dist == 3 ]]; then
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Darwin/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/hfsplus
     curl -L -o bin/zenity https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/zenity
-    # iboot patcher oops
-    curl -L -o ibootpatch.c https://gist.githubusercontent.com/pwnerblu/c759c0060b5167a411b3b3adfcd07572/raw/fd2e870d832ea59c31a54377370ad469f70e6499/patch.c
-    gcc ibootpatch.c -o bin/iBootPatch
-    rm -rf ibootpatch.c
     # from spironolactone oops
     curl -L -o bin/trustcache https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/trustcache
     curl -L -o bin/iBoot64Patcher2 https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/iBoot64Patcher_cryptic
@@ -479,31 +529,23 @@ elif [[ $dist == 3 ]]; then
     mv libimg4_patcher ../bin/libimg4_patcher
     cd ..
     rm -rf "libimg4_patcher"
-    # the favor goes to openra1n by Mineek (pongoOS on unsigned bootchains), uses Nick Chan fork of openra1n
-    git clone https://github.com/asdfugil/openra1n -b ipad6
-    cd openra1n
-    curl -L -o Makefile https://github.com/mineek/openra1n/raw/refs/heads/sigcheck/Makefile
-    make || true
-    mv openra1n ../bin/openra1n || true
-    cd ..
-    rm -rf "openra1n"
-    # palera1n macOS bin
-    curl -L -o bin/palera1n https://github.com/palera1n/palera1n/releases/download/v2.2.1/palera1n-macos-universal
     # install Kernel64Patcher for tether booting iOS 13+
     curl -L -o bin/Kernel64Patcher https://github.com/edwin170/downr1n/raw/refs/heads/main/binaries/Darwin/Kernel64Patcher
     # fetch pwnerblu fork of Kernel64Patcher and iBootpatch2 for tether booting iOS 14.x on A12 device.
-    git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
-    cd Kernel64Patcher
-    make
-    cp Kernel64Patcher ../bin/Kernel64Patcher3
-    cd ..
-    rm -rf "Kernel64Patcher"
-    git clone https://github.com/pwnerblu/iBootpatch2 -b ipad6
-    cd iBootpatch2
-    make
-    cp iBootpatch2 ../bin/iBootpatch2
-    cd ..
-    rm -rf "iBootpatch2"
+    if [[ $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
+        git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
+        cd Kernel64Patcher
+        make
+        cp Kernel64Patcher ../bin/Kernel64Patcher3
+        cd ..
+        rm -rf "Kernel64Patcher"
+        git clone https://github.com/pwnerblu/iBootpatch2 -b ipad6
+        cd iBootpatch2
+        make
+        cp iBootpatch2 ../bin/iBootpatch2
+        cd ..
+        rm -rf "iBootpatch2"
+    fi
     # done!
     curl -L -o bin/gaster https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/gaster
     curl -L -o bin/tsschecker https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/tsschecker
@@ -549,10 +591,6 @@ elif [[ $dist == 4 ]]; then
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Darwin/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/hfsplus
     curl -L -o bin/zenity https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/zenity
-    # iboot patcher oops
-    curl -L -o ibootpatch.c https://gist.githubusercontent.com/pwnerblu/c759c0060b5167a411b3b3adfcd07572/raw/fd2e870d832ea59c31a54377370ad469f70e6499/patch.c
-    gcc ibootpatch.c -o bin/iBootPatch
-    rm -rf ibootpatch.c
     # from spironolactone oops
     curl -L -o bin/trustcache https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/trustcache
     curl -L -o bin/iBoot64Patcher2 https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/iBoot64Patcher_cryptic
@@ -563,16 +601,6 @@ elif [[ $dist == 4 ]]; then
     curl -L -o bin/ipatcher https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Darwin/iPatcher
     # install additional restored_external patcher (iPhone X only)
     curl -L -o bin/ipx_restored_patcher https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/ipx_restored_patcher
-    # palera1n macOS bin
-    curl -L -o bin/palera1n https://github.com/palera1n/palera1n/releases/download/v2.2.1/palera1n-macos-universal
-    # the favor goes to openra1n by Mineek (pongoOS on unsigned bootchains), uses Nick Chan fork of openra1n
-    git clone https://github.com/asdfugil/openra1n -b ipad6
-    cd openra1n
-    curl -L -o Makefile https://github.com/mineek/openra1n/raw/refs/heads/sigcheck/Makefile
-    make OBJCOPY=$(brew --prefix)/opt/binutils/bin/gobjcopy || true
-    mv openra1n ../bin/openra1n || true
-    cd ..
-    rm -rf "openra1n" 
     # restored patcher for seprmvr64 A8+ restores, my fork of mineek's restored patcher but repurposed
     curl -L -o main.c https://gist.githubusercontent.com/pwnerblu/d2adc5adee74a679704577ddd64508bf/raw/991a74e2bbbdebdb1dd2d49d82f0829e7553f02f/main.c
     gcc main.c -o bin/restoredpatcher
@@ -601,18 +629,20 @@ elif [[ $dist == 4 ]]; then
     # install Kernel64Patcher for tether booting iOS 13+
     curl -L -o bin/Kernel64Patcher https://github.com/edwin170/downr1n/raw/refs/heads/main/binaries/Darwin/Kernel64Patcher
     # fetch pwnerblu fork of Kernel64Patcher and iBootpatch2 for tether booting iOS 14.x on A12 device.
-    git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
-    cd Kernel64Patcher
-    make
-    cp Kernel64Patcher ../bin/Kernel64Patcher3
-    cd ..
-    rm -rf "Kernel64Patcher"
-    git clone https://github.com/pwnerblu/iBootpatch2 -b ipad6
-    cd iBootpatch2
-    make
-    cp iBootpatch2 ../bin/iBootpatch2
-    cd ..
-    rm -rf "iBootpatch2"
+    if [[ $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
+        git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
+        cd Kernel64Patcher
+        make
+        cp Kernel64Patcher ../bin/Kernel64Patcher3
+        cd ..
+        rm -rf "Kernel64Patcher"
+        git clone https://github.com/pwnerblu/iBootpatch2 -b ipad6
+        cd iBootpatch2
+        make
+        cp iBootpatch2 ../bin/iBootpatch2
+        cd ..
+        rm -rf "iBootpatch2"
+    fi
     # done!
     curl -L -o bin/gaster https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/gaster
     curl -L -o bin/tsschecker https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/tsschecker
@@ -658,6 +688,21 @@ else
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Linux/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Linux/hfsplus
     # sshpass
+    curl -L -o bin/trustcache https://github.com/CRKatri/trustcache/releases/download/v2.0/trustcache_linux_x86_64
+    # fetch pwnerblu fork of Kernel64Patcher and iBootpatch2 for tether booting iOS 14.x on A12 device.
+    git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
+    cd Kernel64Patcher
+    make
+    cp Kernel64Patcher ../bin/Kernel64Patcher3
+    cd ..
+    rm -rf "Kernel64Patcher"
+    git clone https://github.com/pwnerblu/iBootpatch2 -b ipad6
+    cd iBootpatch2
+    make
+    cp iBootpatch2 ../bin/iBootpatch2
+    cd ..
+    rm -rf "iBootpatch2"
+    curl -L -o bin/iBoot64Patcher2 https://github.com/appleiPodTouch4/spironolactone/raw/refs/heads/main/Linux/x86_64/iBoot64patcher_cryptic
     curl -L -o bin/sshpass https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/linux/x86_64/sshpass
     curl -L -o bin/iproxy https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Linux/iproxy
     curl -L -o bin/zenity https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/linux/x86_64/zenity
@@ -727,7 +772,7 @@ fi
 
 echo "Checking for dependencies that are required for usbliter8ctl, assuming Python3 is on your system"
 # Check required packages
-PACKAGES=("pyusb")
+PACKAGES=("pyusb" "usb")
 for pkg in "${PACKAGES[@]}"; do
     if pip3 show "$pkg" &>/dev/null; then
         version=$(pip3 show "$pkg" | grep Version | awk '{print $2}')
@@ -803,9 +848,9 @@ KEY_FILE="keys/$IDENTIFIER.txt"
 
 # BB update determine check
 
-if [[ $IDENTIFIER == iPhone* || $IDENTIFIER == iPad4,2 || $IDENTIFIER == iPad4,3 || $IDENTIFIER == iPad4,5 || $IDENTIFIER == iPad4,6 || $IDENTIFIER == iPad4,8 || $IDENTIFIER == iPad4,9 || $IDENTIFIER == iPad5,2 || $IDENTIFIER == iPad5,4 ]]; then
+if [[ $IDENTIFIER == iPhone* || $IDENTIFIER == iPad4,2 || $IDENTIFIER == iPad4,3 || $IDENTIFIER == iPad4,5 || $IDENTIFIER == iPad4,6 || $IDENTIFIER == iPad4,8 || $IDENTIFIER == iPad4,9 || $IDENTIFIER == iPad5,2 || $IDENTIFIER == iPad5,4 || $IDENTIFIER == iPad11,2 || $IDENTIFIER == iPad11,4 ]]; then
     updatebb_flag="--latest-baseband"
-elif [[ $IDENTIFIER == iPod* || $IDENTIFIER == iPad4,1 || $IDENTIFIER == iPad4,4 || $IDENTIFIER == iPad4,7 || $IDENTIFIER == iPad5,1 || $IDENTIFIER == iPad5,3 ]]; then
+elif [[ $IDENTIFIER == iPod* || $IDENTIFIER == iPad4,1 || $IDENTIFIER == iPad4,4 || $IDENTIFIER == iPad4,7 || $IDENTIFIER == iPad5,1 || $IDENTIFIER == iPad5,3 || $IDENTIFIER == iPad11,1 || $IDENTIFIER == iPad11,3 ]]; then
     updatebb_flag="--no-baseband"
 fi
 
@@ -844,6 +889,153 @@ elif [[ $IDENTIFIER == iPhone11,8 ]]; then
     MTFW="N841_Multitouch.im4p"
     WIRELESS="WirelessPower.iphone11b.im4p"
     KERNEL2="kernelcache.release.iphone11x"
+elif [[ $IDENTIFIER == iPad11,1 ]]; then
+    REFER="ipad11"
+    REFER2="j210"
+    BOARDID="j210ap"
+    BOARDID2="j210"
+    NAME="iPad mini (5th generation, Wi-Fi only) ($BOARDID)"
+    AOP14="aopfw-ipad11aop.im4p"
+    AOP="aopfw-ipad11aop.RELEASE.im4p"
+    IOFW="SmartIOFirmware_ASCv2.im4p"
+    GFX="armfw_g11p.im4p"
+    ISP="adc-petra-j2x.im4p"
+    ANE="h11_ane_fw_quin.im4p"
+    AVE="AppleAVE2FW_H11.im4p"
+    MTFW="J210_Multitouch.im4p"
+    # ipad wifi version doesn't have callan firmware
+    # ipad doesn't hav haptic firmware
+    # ipad wifi version doesn't have wirelesspower firmware
+    KERNEL2="kernelcache.release.ipad11x"
+elif [[ $IDENTIFIER == iPad11,2 ]]; then
+    REFER="ipad11"
+    REFER2="j210"
+    BOARDID="j211ap"
+    BOARDID2="j210"
+    NAME="iPad mini (5th generation, Cellular) ($BOARDID)"
+    AOP14="aopfw-ipad11aop.im4p"
+    AOP="aopfw-ipad11aop.RELEASE.im4p"
+    IOFW="SmartIOFirmware_ASCv2.im4p"
+    GFX="armfw_g11p.im4p"
+    ISP="adc-petra-j2x.im4p"
+    ANE="h11_ane_fw_quin.im4p"
+    AVE="AppleAVE2FW_H11.im4p"
+    MTFW="J211_Multitouch.im4p"
+    # ipad wifi version doesn't have callan firmware
+    # ipad doesn't hav haptic firmware
+    # ipad wifi version doesn't have wirelesspower firmware
+    KERNEL2="kernelcache.release.ipad11x"
+elif [[ $IDENTIFIER == iPad11,3 ]]; then
+    REFER="ipad11"
+    REFER2="j217"
+    BOARDID="j217ap"
+    BOARDID2="j217"
+    NAME="iPad Air (3rd generation, Wi-Fi only) ($BOARDID)"
+    AOP14="aopfw-ipad11aop.im4p"
+    AOP="aopfw-ipad11aop.RELEASE.im4p"
+    IOFW="SmartIOFirmware_ASCv2.im4p"
+    GFX="armfw_g11p.im4p"
+    ISP="adc-petra-j2x.im4p"
+    ANE="h11_ane_fw_quin.im4p"
+    AVE="AppleAVE2FW_H11.im4p"
+    MTFW="J217_Multitouch.im4p"
+    # ipad wifi version doesn't have callan firmware
+    # ipad doesn't hav haptic firmware
+    # ipad wifi version doesn't have wirelesspower firmware
+    KERNEL2="kernelcache.release.ipad11x"
+elif [[ $IDENTIFIER == iPad11,4 ]]; then
+    REFER="ipad11"
+    REFER2="j217"
+    BOARDID="j218ap"
+    BOARDID2="j217"
+    NAME="iPad Air (3rd generation, Cellular) ($BOARDID)"
+    AOP14="aopfw-ipad11aop.im4p"
+    AOP="aopfw-ipad11aop.RELEASE.im4p"
+    IOFW="SmartIOFirmware_ASCv2.im4p"
+    GFX="armfw_g11p.im4p"
+    ISP="adc-petra-j2x.im4p"
+    ANE="h11_ane_fw_quin.im4p"
+    AVE="AppleAVE2FW_H11.im4p"
+    MTFW="J218_Multitouch.im4p"
+    # ipad wifi version doesn't have callan firmware
+    # ipad doesn't hav haptic firmware
+    # ipad wifi version doesn't have wirelesspower firmware
+    KERNEL2="kernelcache.release.ipad11x"
+elif [[ $IDENTIFIER == iPhone11,2 ]]; then
+    REFER="iphone11"
+    REFER2="d321"
+    BOARDID="d321ap"
+    BOARDID2="d321"
+    NAME="iPhone XS ($BOARDID)"
+    AOP14="aopfw-iphone11aop.im4p"
+    AOP="aopfw-iphone11aop.RELEASE.im4p"
+    IOFW="SmartIOFirmware_ASCv2.im4p"
+    GFX="armfw_g11p.im4p"
+    ISP="adc-petra-d3x.im4p"
+    ANE="h11_ane_fw_quin.im4p"
+    AVE="AppleAVE2FW_H11.im4p"
+    CALLAN="D321_CallanFirmware.im4p"
+    HAPTICASSET="D321_HapticAssets.im4p"
+    MTFW="D321_Multitouch.im4p"
+    WIRELESS="WirelessPower.iphone11.im4p"
+    KERNEL2="kernelcache.release.iphone11x"
+elif [[ $IDENTIFIER == iPhone11,4 ]]; then
+    REFER="iphone11"
+    REFER2="d331"
+    BOARDID="d331ap"
+    BOARDID2="d331"
+    NAME="iPhone XS Max ($BOARDID)"
+    AOP14="aopfw-iphone11aop.im4p"
+    AOP="aopfw-iphone11aop.RELEASE.im4p"
+    IOFW="SmartIOFirmware_ASCv2.im4p"
+    GFX="armfw_g11p.im4p"
+    ISP="adc-petra-d3x.im4p"
+    ANE="h11_ane_fw_quin.im4p"
+    AVE="AppleAVE2FW_H11.im4p"
+    CALLAN="D331_CallanFirmware.im4p"
+    HAPTICASSET="D331_HapticAssets.im4p"
+    MTFW="D331_Multitouch.im4p"
+    WIRELESS="WirelessPower.iphone11.im4p"
+    KERNEL2="kernelcache.release.iphone11x"
+elif [[ $IDENTIFIER == iPhone11,6 ]]; then
+    REFER="iphone11"
+    REFER2="d331p"
+    BOARDID="d331pap"
+    BOARDID2="d331p"
+    NAME="iPhone XS Max ($BOARDID)"
+    AOP14="aopfw-iphone11aop.im4p"
+    AOP="aopfw-iphone11aop.RELEASE.im4p"
+    IOFW="SmartIOFirmware_ASCv2.im4p"
+    GFX="armfw_g11p.im4p"
+    ISP="adc-petra-d3x.im4p"
+    ANE="h11_ane_fw_quin.im4p"
+    AVE="AppleAVE2FW_H11.im4p"
+    CALLAN="D331p_CallanFirmware.im4p"
+    HAPTICASSET="D331p_HapticAssets.im4p"
+    MTFW="D331p_Multitouch.im4p"
+    WIRELESS="WirelessPower.iphone11.im4p"
+    KERNEL2="kernelcache.release.iphone11x"
+elif [[ $IDENTIFIER == iPhone12,1 ]]; then
+    REFER="iphone12b"
+    REFER2="n104"
+    BOARDID="n104ap"
+    BOARDID2="n104"
+    NAME="iPhone 11 ($BOARDID)"
+    AOP14="aopfw-iphone12baop.im4p"
+    AOP="aopfw-iphone12baop.RELEASE.im4p"
+    IOFW="SmartIOFirmware_ASCv2.im4p"
+    IOFW13="SmartIOFirmwareT8030.im4p"
+    AVE13="AppleAVE2FW.im4p"
+    GFX="armfw_g12p.im4p"
+    ISP="adc-zelus-n104.im4p"
+    ANE="h12_ane_fw_metis.im4p"
+    AVE="AppleAVE2FW_H12.im4p"
+    CALLAN="N104_AudioCodecFirmware.im4p"
+    HAPTICASSET="N104_HapticAssets.im4p"
+    MTFW="N104_Multitouch.im4p"
+    LEAPHAPTIC="N104_LeapHapticsFirmware.im4p"
+    WIRELESS="WirelessPower.iphone12b.im4p"
+    KERNEL2="kernelcache.release.iphone12x"
 elif [[ $IDENTIFIER == iPhone12,3 ]]; then
     REFER="iphone12"
     REFER2="d421"
@@ -853,6 +1045,8 @@ elif [[ $IDENTIFIER == iPhone12,3 ]]; then
     AOP14="aopfw-iphone12aop.im4p"
     AOP="aopfw-iphone12aop.RELEASE.im4p"
     IOFW="SmartIOFirmware_ASCv2.im4p"
+    IOFW13="SmartIOFirmwareT8030.im4p"
+    AVE13="AppleAVE2FW.im4p"
     GFX="armfw_g12p.im4p"
     ISP="adc-zelus-d4x.im4p"
     ANE="h12_ane_fw_metis.im4p"
@@ -863,7 +1057,6 @@ elif [[ $IDENTIFIER == iPhone12,3 ]]; then
     LEAPHAPTIC="D421_LeapHapticsFirmware.im4p"
     WIRELESS="WirelessPower.iphone12.im4p"
     KERNEL2="kernelcache.release.iphone12x"
-    PMP="t8030pmp.im4p"
 elif [[ $IDENTIFIER == iPhone12,5 ]]; then
     REFER="iphone12"
     REFER2="d431"
@@ -873,6 +1066,8 @@ elif [[ $IDENTIFIER == iPhone12,5 ]]; then
     AOP14="aopfw-iphone12aop.im4p"
     AOP="aopfw-iphone12aop.RELEASE.im4p"
     IOFW="SmartIOFirmware_ASCv2.im4p"
+    IOFW13="SmartIOFirmwareT8030.im4p"
+    AVE13="AppleAVE2FW.im4p"
     GFX="armfw_g12p.im4p"
     ISP="adc-zelus-d4x.im4p"
     ANE="h12_ane_fw_metis.im4p"
@@ -883,7 +1078,6 @@ elif [[ $IDENTIFIER == iPhone12,5 ]]; then
     LEAPHAPTIC="D431_LeapHapticsFirmware.im4p"
     WIRELESS="WirelessPower.iphone12.im4p"
     KERNEL2="kernelcache.release.iphone12x"
-    PMP="t8030pmp.im4p"
 elif [[ $IDENTIFIER == iPhone12,8 ]]; then
     REFER="iphone12c"
     REFER2="d79"
@@ -893,10 +1087,12 @@ elif [[ $IDENTIFIER == iPhone12,8 ]]; then
     AOP14="aopfw-iphone12caop.im4p"
     AOP="aopfw-iphone12caop.RELEASE.im4p"
     IOFW="SmartIOFirmware_ASCv2.im4p"
+    IOFW13="SmartIOFirmwareT8030.im4p"
     GFX="armfw_g12p.im4p"
     ISP="adc-zelus-d79.im4p"
     ANE="h12_ane_fw_metis.im4p"
     AVE="AppleAVE2FW_H12.im4p"
+    AVE13="AppleAVE2FW.im4p"
     CALLAN="D79_AudioCodecFirmware.im4p"
     MTFW="D79_Multitouch.im4p"
     WIRELESS="WirelessPower.iphone12c.im4p"
@@ -1034,7 +1230,9 @@ elif [[ $IDENTIFIER == iPhone10* ]]; then
 elif [[ $IDENTIFIER == iPhone11* ]]; then
     LATEST_VERSION="18.7.9"
 elif [[ $IDENTIFIER == iPhone12* ]]; then
-    LATEST_VERSION="26.5.2"
+    LATEST_VERSION="26.6"
+elif [[ $IDENTIFIER == iPad11* ]]; then
+    LATEST_VERSION="26.6"
 else
     LATEST_VERSION="12.5.8"
 fi
@@ -1054,25 +1252,20 @@ IBSS7="iBSS.$BOARDID.RELEASE.im4p"
 IBEC7="iBEC.$BOARDID.RELEASE.im4p"
 KERNEL10="kernelcache.release.$BOARDID2"
 
-INFO_TEXT="surrealra1n - $CURRENT_VERSION
+INFO_TEXT="$PROJECT_NAME - $CURRENT_VERSION
 Tether Downgrader for some checkm8 64bit devices, iOS 7.0 - 15.8.5
-This build is an early beta. Use at your own risk, and expect bugs.
+Personal fork focused primarily on experimental A12/A13 testing.
+Based on surrealra1n by PWNBlue. Use at your own risk, and expect bugs.
 
 Uses latest SHSH blobs (for tethered downgrades)
 iSuns9 fork of asr64_patcher is used for patching ASR
 Huge thanks to bodyc1m for iPod touch 6 support, including the Arch Linux/Fedora port they did.
-Huge thanks to Mineek for openra1n and seprmvr64.
+Huge thanks to Mineek for seprmvr64.
 
 Device: $NAME
 ECID: $ECID
 
 Device is in $MODE mode."
-
-if [[ $IDENTIFIER == iPhone12* ]]; then
-    echo "A13 support is extremely experimental and not fully tested on actual A13 devices."
-    echo "Expect bugs and issues."
-    read -p "Press enter to continue"
-fi
 
 misc_utils(){
 
@@ -1081,27 +1274,28 @@ echo "$INFO_TEXT"
 echo ""
 echo "Options:"
 echo ""
-echo "1. Reinstall surrealra1n"
+echo "1. Reinstall $PROJECT_NAME"
 echo "2. Clear all created boot files and restore files"
+echo "3. Clear downloaded files and caches"
 if [[ -d "surrealra1n.old" ]]; then
-    echo "3. Go back to previous version of surrealra1n"
-    echo "4. Back"
+    echo "4. Go back to previous version of $PROJECT_NAME"
+    echo "5. Back"
 else
-    echo "3. Back"
+    echo "4. Back"
 fi
 if [[ -d "surrealra1n.old" ]]; then
-    read -p "Please input an option (1-4): " misc_utils_options
+    read -p "Please input an option (1-5): " misc_utils_options
 else
-    read -p "Please input an option (1-3): " misc_utils_options
+    read -p "Please input an option (1-4): " misc_utils_options
 fi
 if [[ $misc_utils_options == 1 ]]; then
-    echo "WARNING: All of your boot files, and other things will be deleted (if any files are in the surrealra1n directory, they will be erased), and surrealra1n will be fresh installed."
-    read -p "Are you sure you want to reinstall surrealra1n? (y/N): " surrealra1n_reinstall
+    echo "WARNING: All boot files and other generated data in this directory will be erased, and $PROJECT_NAME will be freshly installed."
+    read -p "Are you sure you want to reinstall $PROJECT_NAME? (y/N): " surrealra1n_reinstall
     if [[ $surrealra1n_reinstall == Y || $surrealra1n_reinstall == y ]]; then
         sudo rm -rf ./*
-        git clone --branch development https://github.com/sthomsonpl/surrealra1n repo --recursive
+        git clone --branch development "$PROJECT_REPOSITORY" repo --recursive
         if [[ ! -d repo ]]; then
-            echo "Failed to clone repository. You will need to fetch surrealra1n from releases on GitHub"
+            echo "Failed to clone repository. You will need to fetch $PROJECT_NAME from GitHub."
             exit 1
         fi
         echo "Copying new files..."
@@ -1109,10 +1303,10 @@ if [[ $misc_utils_options == 1 ]]; then
         chmod +x surrealra1n.sh
 
         rm -rf "repo"
-        echo "surrealra1n has been reinstalled! Please run the script again"
+        echo "$PROJECT_NAME has been reinstalled! Please run the script again"
         exit 0
     else
-        echo "surrealra1n reinstall has been canceled."
+        echo "$PROJECT_NAME reinstall has been canceled."
         misc_utils
     fi
 elif [[ $misc_utils_options == 2 ]]; then
@@ -1127,7 +1321,34 @@ elif [[ $misc_utils_options == 2 ]]; then
         echo "Clearing boot files/restore files has been canceled"
         misc_utils
     fi
-elif [[ $misc_utils_options == 3 ]] && [[ -d "surrealra1n.old" ]]; then
+elif [[ $misc_utils_options == 3 ]]; then
+    echo "WARNING: Downloaded tools, caches and temporary files will be deleted."
+    read -p "Are you sure you want to continue? (y/N): " clear_downloads
+    if [[ $clear_downloads == y || $clear_downloads == Y ]]; then
+        find bin -mindepth 1 -maxdepth 1 \
+            ! -name notice.txt \
+            -exec rm -rf {} +
+        find futurerestore -mindepth 1 -maxdepth 1 \
+            ! -name notice.txt -exec rm -rf {} +
+        rm -rf tmp tmp1 tmp2 work
+        rm -rf payloads/dropbear_sshd/.cache
+        rm -rf payloads/dropbear_sshd/__pycache__
+        rm -rf payloads/dropbear_sshd/rootfs
+        rm -f payloads/dropbear_sshd/payload-manifest.txt
+        rm -f activate.sh backup.sh
+        rm -f ibootpatch.c main.c
+        rm -rf asr64_patcher iBootpatch2 Kernel64Patcher
+        rm -rf lib libimg4_patcher repo restored_external64patcher
+        rm -rf shsh
+        rm -f known_hosts
+        rm -rf knownhosts
+        echo "Downloaded files and caches have been cleared."
+        echo "Required tools will be downloaded on the next run."
+        exit 0
+    else
+        misc_utils
+    fi
+elif [[ $misc_utils_options == 4 ]] && [[ -d "surrealra1n.old" ]]; then
     old_version=$(cat surrealra1n.old/oldversion.txt)
     if [[ "$old_version" == *beta* ]]; then
         echo "Rollback feature is not supported if you update from a beta."
@@ -1136,8 +1357,8 @@ elif [[ $misc_utils_options == 3 ]] && [[ -d "surrealra1n.old" ]]; then
         misc_utils
         return
     fi
-    echo "WARNING: This will restore surrealra1n to the previous version backed up in surrealra1n.old."
-    echo "Any new features from this surrealra1n release may not exist in the previous version"
+    echo "WARNING: This will restore $PROJECT_NAME to the previous version backed up in surrealra1n.old."
+    echo "Any new features from this $PROJECT_NAME release may not exist in the previous version."
     read -p "Are you sure you want to go back to the previous version? (y/N): " rollback_confirm
     if [[ $rollback_confirm == Y || $rollback_confirm == y ]]; then
         rm -rf "bin"
@@ -1147,14 +1368,14 @@ elif [[ $misc_utils_options == 3 ]] && [[ -d "surrealra1n.old" ]]; then
         cp -av surrealra1n.old/. ./
         chmod +x surrealra1n.sh
         rm -rf "surrealra1n.old"
-        echo "surrealra1n has been restored to the previous version! Please run the script again."
+        echo "$PROJECT_NAME has been restored to the previous version! Please run the script again."
         echo "You can upgrade to the latest version at any time later if you want to be on latest again."
         exit 0
     else
         echo "Rollback has been canceled."
         misc_utils
     fi
-elif [[ $misc_utils_options == 3 ]] || [[ $misc_utils_options == 4 ]]; then
+elif [[ $misc_utils_options == 4 ]] || [[ $misc_utils_options == 5 ]]; then
     main_menu
 else
     echo "Invalid option. Exiting."
@@ -1167,7 +1388,7 @@ pwn_device(){
 
 if [[ $IDENTIFIER == iPhone6* || $IDENTIFIER == iPad4* ]] && [[ $dist == 1 || $dist == 2 || $dist == 5 ]]; then
     echo "A7 devices may have issues pwning on Linux"
-    echo "If you have a MacBook, use surrealra1n on that instead"
+    echo "If you have a MacBook, use $PROJECT_NAME on that instead"
     echo "You may choose to continue attempting to pwn with Linux"
     read -p "Press enter to continue"
 fi
@@ -1251,12 +1472,12 @@ fi
 
 switch_to_main(){
 
-echo "Fetching latest stable version info..."
-curl -L -o update/latest_main.txt https://github.com/sthomsonpl/surrealra1n/raw/refs/heads/main/update/latest.txt
+echo "Fetching latest development release info..."
+curl -L -o update/latest_main.txt "$PROJECT_REPOSITORY/raw/refs/heads/development/update/latest.txt"
 MAIN_VERSION=$(head -n 1 "update/latest_main.txt" | tr -d '\r\n')
 
-CURRENT_CLEAN=$(echo "$CURRENT_VERSION" | sed 's/ beta//g' | sed 's/ .*//g' | tr -d 'v')
-MAIN_CLEAN=$(echo "$MAIN_VERSION" | sed 's/ beta//g' | sed 's/ .*//g' | tr -d 'v')
+CURRENT_CLEAN=$(echo "$CURRENT_VERSION" | sed -E 's/^v//; s/ beta[[:space:]]*/./; s/b([0-9]+)$/.\1/; s/[^0-9.].*$//')
+MAIN_CLEAN=$(echo "$MAIN_VERSION" | sed -E 's/^v//; s/ beta[[:space:]]*/./; s/b([0-9]+)$/.\1/; s/[^0-9.].*$//')
 
 CURRENT_MAJOR=$(echo "$CURRENT_CLEAN" | cut -d'.' -f1)
 CURRENT_MINOR=$(echo "$CURRENT_CLEAN" | cut -d'.' -f2)
@@ -1269,11 +1490,11 @@ MAIN_PATCH=$(echo "$MAIN_CLEAN" | cut -d'.' -f3)
 MAIN_PATCH=${MAIN_PATCH:-0}
 
 echo "Current version: $CURRENT_VERSION"
-echo "Latest stable version: $MAIN_VERSION"
+echo "Latest development version: $MAIN_VERSION"
 echo ""
 
 if [[ "$CURRENT_MAJOR" == "$MAIN_MAJOR" && "$CURRENT_MINOR" == "$MAIN_MINOR" && "$CURRENT_PATCH" == "$MAIN_PATCH" ]]; then
-    echo "You are already on the stable equivalent of your current version ($MAIN_VERSION)."
+    echo "You are already on the development equivalent of your current version ($MAIN_VERSION)."
     echo "No action needed."
     read -p "Press enter to go back"
     main_menu
@@ -1282,15 +1503,15 @@ fi
 
 if [[ "$CURRENT_MAJOR" -gt "$MAIN_MAJOR" ]] || \
    [[ "$CURRENT_MAJOR" -eq "$MAIN_MAJOR" && "$CURRENT_MINOR" -gt "$MAIN_MINOR" ]]; then
-    echo "WARNING: You are currently on $CURRENT_VERSION (development branch)."
-    echo "The latest stable version is $MAIN_VERSION (main branch)."
-    echo "Since your development version is newer than stable, switching will require a clean reinstall."
+    echo "WARNING: You are currently on $CURRENT_VERSION (experimental branch)."
+    echo "The latest development version is $MAIN_VERSION."
+    echo "Since your experimental version is newer, switching will require a clean reinstall."
     echo "This means ALL boot files, restore files, and binaries will be deleted."
     echo ""
-    read -p "Are you sure you want to switch to stable? (y/N): " switch_confirm
+    read -p "Are you sure you want to switch to development? (y/N): " switch_confirm
     if [[ $switch_confirm == Y || $switch_confirm == y ]]; then
         sudo rm -rf ./*
-        git clone --branch main https://github.com/sthomsonpl/surrealra1n repo --recursive
+        git clone --branch development "$PROJECT_REPOSITORY" repo --recursive
         if [[ ! -d repo ]]; then
             echo "Failed to clone repository."
             exit 1
@@ -1299,28 +1520,28 @@ if [[ "$CURRENT_MAJOR" -gt "$MAIN_MAJOR" ]] || \
         cp -av repo/. ./
         chmod +x surrealra1n.sh
         rm -rf "repo"
-        echo "surrealra1n has been switched to stable $MAIN_VERSION! Please run the script again."
+        echo "$PROJECT_NAME has been switched to development $MAIN_VERSION! Please run the script again."
         exit 0
     else
-        echo "Switch to stable has been canceled."
+        echo "Switch to development has been canceled."
         main_menu
     fi
 else
-    echo "You are on $CURRENT_VERSION (development branch)."
-    echo "Latest stable version is $MAIN_VERSION (main branch)."
-    echo "This will upgrade you to stable without wiping your boot/restore files."
+    echo "You are on $CURRENT_VERSION (experimental branch)."
+    echo "Latest development version is $MAIN_VERSION."
+    echo "This will switch you to development without wiping your boot/restore files."
     echo ""
-    read -p "Would you like to switch to stable? (y/N): " switch_confirm
+    read -p "Would you like to switch to development? (y/N): " switch_confirm
     if [[ $switch_confirm == Y || $switch_confirm == y ]]; then
         rm -rf "surrealra1n.old"
         mkdir -p surrealra1n.old
-        echo "Backing up your current surrealra1n installation..."
+        echo "Backing up your current $PROJECT_NAME installation..."
         echo "$CURRENT_VERSION" > surrealra1n.old/oldversion.txt
         mv -v bin surrealra1n.old/
         mv -v futurerestore surrealra1n.old/
         mv -v keys surrealra1n.old/
         mv -v surrealra1n.sh surrealra1n.old/
-        git clone --branch main https://github.com/sthomsonpl/surrealra1n repo --recursive
+        git clone --branch development "$PROJECT_REPOSITORY" repo --recursive
         if [[ ! -d repo ]]; then
             echo "Failed to clone repository."
             exit 1
@@ -1329,10 +1550,10 @@ else
         cp -av repo/. ./
         chmod +x surrealra1n.sh
         rm -rf "repo"
-        echo "surrealra1n has been switched to stable $MAIN_VERSION! Please run the script again."
+        echo "$PROJECT_NAME has been switched to development $MAIN_VERSION! Please run the script again."
         exit 0
     else
-        echo "Switch to stable has been canceled."
+        echo "Switch to development has been canceled."
         main_menu
     fi
 fi
@@ -1395,6 +1616,7 @@ reset_restore_vars() {
     VERSION=""
     BUILD=""
     VERSION_LATEST=""
+    ssv_reset_options
 }
 
 sep_checker(){
@@ -1712,7 +1934,7 @@ echo "3. Start Restore"
 echo "4. Back"
 read -p "Please input an option (1-4): " untether_options
 if [[ $untether_options == 1 ]]; then
-    IPSW_PATH=$($zenity --file-selection --title="Select an IPSW file")
+    IPSW_PATH=$(pick_file "Select an IPSW file")
     if [[ -z "$IPSW_PATH" ]]; then
         echo "No IPSW selected. Aborting."
         exit 1
@@ -1722,7 +1944,7 @@ if [[ $untether_options == 1 ]]; then
     VERSION=$(grep -A1 "ProductVersion" work/BuildManifest.plist | grep -o '<string>[^<]*</string>' | head -1 | sed 's/<[^>]*>//g')
     restore_untethered_opts
 elif [[ $untether_options == 2 ]]; then
-    SHSH_PATH=$($zenity --file-selection --title="Select an SHSH2 file")
+    SHSH_PATH=$(pick_file "Select an SHSH2 file")
     if [[ -z "$SHSH_PATH" ]]; then
         echo "No SHSH blob selected. Aborting."
         exit 1
@@ -1921,6 +2143,7 @@ rm -rf "work"
 make_custom_ipsw_a12_ios14(){
 
 IBSS_KEY=$(grep "ibss-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
+rm -rf tmp1 tmp2 work
 mkdir -p restorefiles
 mkdir -p restorefiles/$IDENTIFIER
 mkdir -p restorefiles/$IDENTIFIER/$VERSION
@@ -1931,8 +2154,15 @@ unzip "$IPSW_PATH" -d tmp1
 unzip "$IPSW_PATH_LATEST" -d tmp2
 mkdir -p work
 # iBSS patching of course because yes
-if [[ $VERSION == 14.0 ]] && [[ $BUILD != 18A373 ]]; then
-    ipsw_url="https://updates.cdn-apple.com/2020SummerFCS/fullrestores/001-46828/6A00C15C-8AEB-490E-A468-04E28C68E7C9/iPhone11,8,iPhone12,1_14.0_18A373_Restore.ipsw"
+if [[ $VERSION == 14.0 ]] && [[ $BUILD != 18A373 ]] && \
+        [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPad11* ]]; then
+    if [[ $IDENTIFIER == iPhone11,8 ]]; then
+        ipsw_url="https://updates.cdn-apple.com/2020SummerFCS/fullrestores/001-46828/6A00C15C-8AEB-490E-A468-04E28C68E7C9/iPhone11,8,iPhone12,1_14.0_18A373_Restore.ipsw"
+    elif [[ $IDENTIFIER == iPhone11,2 || $IDENTIFIER == iPhone11,4 || $IDENTIFIER == iPhone11,6 ]]; then
+        ipsw_url="https://updates.cdn-apple.com/2020SummerFCS/fullrestores/001-46850/8A4DA7D0-40E1-4079-A159-5B0983102B66/iPhone11,2,iPhone11,4,iPhone11,6,iPhone12,3,iPhone12,5_14.0_18A373_Restore.ipsw"
+    elif [[ $IDENTIFIER == iPad11,1 || $IDENTIFIER == iPad11,2 || $IDENTIFIER == iPad11,3 || $IDENTIFIER == iPad11,4 ]]; then
+        ipsw_url="https://updates.cdn-apple.com/2020SummerFCS/fullrestores/001-46551/EFCA25AF-50BE-4712-A9C2-1E760AD99B82/iPad_Spring_2019_14.0_18A373_Restore.ipsw"
+    fi
     cd work 
     sudo ../bin/pzb -g Firmware/dfu/$IBSS $ipsw_url
     cd ..
@@ -1941,8 +2171,15 @@ if [[ $VERSION == 14.0 ]] && [[ $BUILD != 18A373 ]]; then
     ./bin/iBoot64Patcher2 work/iBSS.raw work/iBSS.patchboot -b "-v"
     ./bin/iBootpatch2 work/iBSS.patchboot boot/$IDENTIFIER/$VERSION/iBSS.boot
     ./bin/img4 -i boot/$IDENTIFIER/iBSS.patch -o tmp2/Firmware/dfu/$IBEC -A -T ibec
-elif [[ $VERSION == 14.5* || $VERSION == 14.6* || $VERSION == 14.7* || $VERSION == 14.8* ]]; then
-    ipsw_url="https://updates.cdn-apple.com/2021WinterFCS/fullrestores/071-22451/5C8BBEE0-8471-4801-8D85-54D33DEDA50D/iPhone11,8,iPhone12,1_14.4.2_18D70_Restore.ipsw"
+elif [[ $VERSION == 14.5* || $VERSION == 14.6* || $VERSION == 14.7* || $VERSION == 14.8* ]] && \
+        [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPad11* ]]; then
+    if [[ $IDENTIFIER == iPhone11,8 ]]; then
+        ipsw_url="https://updates.cdn-apple.com/2021WinterFCS/fullrestores/071-22451/5C8BBEE0-8471-4801-8D85-54D33DEDA50D/iPhone11,8,iPhone12,1_14.4.2_18D70_Restore.ipsw"
+    elif [[ $IDENTIFIER == iPhone11,2 || $IDENTIFIER == iPhone11,4 || $IDENTIFIER == iPhone11,6 ]]; then
+        ipsw_url="https://updates.cdn-apple.com/2021WinterFCS/fullrestores/071-22729/77571761-8A7F-4F67-BB19-12D9BC82405B/iPhone11,2,iPhone11,4,iPhone11,6,iPhone12,3,iPhone12,5_14.4.2_18D70_Restore.ipsw"
+    elif [[ $IDENTIFIER == iPad11,1 || $IDENTIFIER == iPad11,2 || $IDENTIFIER == iPad11,3 || $IDENTIFIER == iPad11,4 ]]; then
+        ipsw_url="https://updates.cdn-apple.com/2021WinterFCS/fullrestores/071-22329/CF450435-1EDC-4212-A768-D666A1677EC5/iPad_Spring_2019_14.4.2_18D70_Restore.ipsw"
+    fi
     cd work 
     sudo ../bin/pzb -g Firmware/dfu/$IBSS $ipsw_url
     cd ..
@@ -1954,7 +2191,14 @@ elif [[ $VERSION == 14.5* || $VERSION == 14.6* || $VERSION == 14.7* || $VERSION 
 elif [[ $VERSION == 15.* ]]; then
     ./bin/img4 -i tmp1/Firmware/dfu/$IBSS -o work/iBSS.raw -k $IBSS_KEY
     ./bin/iBootPatch work/iBSS.raw boot/$IDENTIFIER/iBSS.patch
-    ./bin/iBootPatch work/iBSS.raw work/iBSS.patchboot 
+    ./bin/iBootPatch work/iBSS.raw work/iBSS.patchboot
+    ./bin/iBootpatch2 work/iBSS.patchboot boot/$IDENTIFIER/$VERSION/iBSS.boot
+    ./bin/img4 -i boot/$IDENTIFIER/iBSS.patch -o tmp2/Firmware/dfu/$IBEC -A -T ibec
+elif [[ $VERSION == 14.* ]] && [[ $IDENTIFIER == iPhone12* ]]; then
+    # use different patch method for A13 iOS 14. use updated iBootPatch
+    ./bin/img4 -i tmp1/Firmware/dfu/$IBSS -o work/iBSS.raw -k $IBSS_KEY
+    ./bin/iBootPatch work/iBSS.raw boot/$IDENTIFIER/iBSS.patch
+    ./bin/iBootPatch work/iBSS.raw work/iBSS.patchboot
     ./bin/iBootpatch2 work/iBSS.patchboot boot/$IDENTIFIER/$VERSION/iBSS.boot
     ./bin/img4 -i boot/$IDENTIFIER/iBSS.patch -o tmp2/Firmware/dfu/$IBEC -A -T ibec
 else
@@ -1965,7 +2209,11 @@ else
     ./bin/img4 -i boot/$IDENTIFIER/iBSS.patch -o tmp2/Firmware/dfu/$IBEC -A -T ibec
 fi
 #
-if [[ $IDENTIFIER == iPhone11* ]] && [[ $BUILD != 18A5342e ]]; then
+if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPad11* ]] && [[ $BUILD != 18A5342e ]]; then
+    # update rd stuff
+    restore_ramdisk_dmg=$(find_dmg tmp1 largest 1073741824)
+    restored="restored_update"
+elif [[ $IDENTIFIER == iPhone12* ]] && [[ $VERSION == 14.* || $VERSION == 15.* ]]; then
     # update rd stuff
     restore_ramdisk_dmg=$(find_dmg tmp1 largest 1073741824)
     restored="restored_update"
@@ -1984,21 +2232,62 @@ fs_dmg_name=${fs_dmg##*/}
 fs_dmg_18_name=${fs_dmg_18##*/}
 ramdisk_dmg_name_18=${restore_ramdisk_dmg_18##*/}
 ramdisk_dmg_name=${restore_ramdisk_dmg##*/}
-sudo plutil -replace BuildIdentities.0.Manifest.KernelCache.Info.Path -string "$KERNEL2" tmp2/BuildManifest.plist
+if [[ $IDENTIFIER == iPhone12,8 || $IDENTIFIER == iPhone12,1 || $IDENTIFIER == iPhone11,8 || $IDENTIFIER == iPhone12,3 || $IDENTIFIER == iPhone11,2 || $IDENTIFIER == iPad11,1 ]]; then
+    IDENTITY="0"
+elif [[ $IDENTIFIER == iPhone11,4 || $IDENTIFIER == iPhone12,5 || $IDENTIFIER == iPad11,2 ]]; then
+    IDENTITY="1"
+elif [[ $IDENTIFIER == iPhone11,6 || $IDENTIFIER == iPad11,3 ]]; then
+    IDENTITY="2"
+elif [[ $IDENTIFIER == iPad11,4 ]]; then
+    IDENTITY="3"
+fi
+sudo KERNEL2="$KERNEL2" IDENTITY="$IDENTITY" python3 <<'PY'
+import os
+import plistlib
+
+with open("tmp2/BuildManifest.plist", "rb") as f:
+    plist = plistlib.load(f)
+
+identity = int(os.environ["IDENTITY"])
+
+plist["BuildIdentities"][identity]["Manifest"]["KernelCache"]["Info"]["Path"] = os.environ["KERNEL2"]
+
+with open("tmp2/BuildManifest.plist", "wb") as f:
+    plistlib.dump(plist, f)
+PY
 cp -v tmp1/Firmware/AOP/$AOP14 tmp2/Firmware/AOP/$AOP
 cp -v tmp1/Firmware/agx/$GFX tmp2/Firmware/agx/$GFX
 cp -v tmp1/Firmware/ane/$ANE tmp2/Firmware/ane/$ANE
-cp -v tmp1/Firmware/ave/$AVE tmp2/Firmware/ave/$AVE
 cp -v tmp1/Firmware/isp_bni/$ISP tmp2/Firmware/isp_bni/$ISP
-cp -v tmp1/Firmware/WirelessPower/$WIRELESS tmp2/Firmware/WirelessPower/$WIRELESS
-cp -v tmp1/Firmware/$MTFW tmp2/Firmware/$MTFW
-cp -v tmp1/Firmware/$CALLAN tmp2/Firmware/$CALLAN
-if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12* ]] && [[ $IDENTIFIER != iPhone12,8 ]]; then
+if [[ $IDENTIFIER == iPhone* ]]; then
+    cp -v tmp1/Firmware/$CALLAN tmp2/Firmware/$CALLAN
+    cp -v tmp1/Firmware/WirelessPower/$WIRELESS tmp2/Firmware/WirelessPower/$WIRELESS
+fi
+if [[ ($IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12*) &&
+      $IDENTIFIER != iPhone12,8 ]]; then
     cp -v tmp1/Firmware/$HAPTICASSET tmp2/Firmware/$HAPTICASSET
 fi
 cp -v tmp1/Firmware/all_flash/$DEVICETREE tmp2/Firmware/all_flash/$DEVICETREE
-cp -v tmp1/Firmware/$IOFW tmp2/Firmware/$IOFW
-if [[ $IDENTIFIER == iPhone12* ]] && [[ $IDENTIFIER != iPhone12,8 ]]; then
+if [[ $VERSION == 13.* ]]; then
+    cp -v tmp1/Firmware/$IOFW13 tmp2/Firmware/$IOFW
+    cp -v tmp1/Firmware/ave/$AVE13 tmp2/Firmware/ave/$AVE
+else
+    cp -v tmp1/Firmware/$IOFW tmp2/Firmware/$IOFW
+    cp -v tmp1/Firmware/ave/$AVE tmp2/Firmware/ave/$AVE
+fi
+if [[ $SYSTEM_VOLUME_MODE == sealed ]]; then
+    cp -v tmp1/Firmware/$fs_dmg_name.root_hash tmp2/Firmware/$fs_dmg_18_name.root_hash
+    cp -v tmp1/Firmware/$fs_dmg_name.mtree tmp2/Firmware/$fs_dmg_18_name.mtree
+fi
+if [[ $VERSION == 13.* ]] && [[ $IDENTIFIER == iPhone12* ]]; then
+    echo "Using latest MTFW"
+elif [[ $IDENTIFIER == iPhone11,2 || $IDENTIFIER == iPhone11,4 || $IDENTIFIER == iPhone11,6 ]]; then
+    echo "Using latest MTFW"
+else
+    cp -v tmp1/Firmware/$MTFW tmp2/Firmware/$MTFW # copy MTFW for target iOS
+fi
+if [[ ($IDENTIFIER == iPhone12*) &&
+      $IDENTIFIER != iPhone12,8 ]]; then
     cp -v tmp1/Firmware/$LEAPHAPTIC tmp2/Firmware/$LEAPHAPTIC
     cp -v tmp1/Firmware/pmp/$PMP tmp2/Firmware/pmp/$PMP
 fi
@@ -2006,13 +2295,16 @@ if [[ $IDENTIFIER == iPhone12* ]]; then
     cp -v tmp1/Firmware/pmp/$PMP tmp2/Firmware/pmp/$PMP
 fi
 cp -v $fs_dmg $fs_dmg_18 # replace rootfs in the IPSW
+ssv_apply_custom_binpatches "$fs_dmg" "$fs_dmg_18"
+ssv_patch_custom_canonical_mtree \
+    "tmp2/Firmware/$fs_dmg_18_name.mtree"
 cp -v tmp1/Firmware/$fs_dmg_name.trustcache tmp2/Firmware/$fs_dmg_18_name.trustcache 
-cp -v tmp1/Firmware/$fs_dmg_name.root_hash tmp2/Firmware/$fs_dmg_18_name.root_hash 
-cp -v tmp1/Firmware/$fs_dmg_name.mtree tmp2/Firmware/$fs_dmg_18_name.mtree 
 cp -v tmp1/Firmware/$ramdisk_dmg_name.trustcache tmp2/Firmware/$ramdisk_dmg_name_18.trustcache
 ./bin/img4 -i tmp1/$KERNEL -o work/kernel.raw
 if [[ $VERSION == 14.* ]]; then
     ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -b # use kernel64patcher3, properly patch trust evaluation check on ios 14 arm64e
+elif [[ $VERSION == 13.* ]]; then
+    ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -b13 -n # make booting take less time (added -b13 to hopefully fix haptics issue)
 else
     ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -e -o -r -b15
 fi
@@ -2023,6 +2315,7 @@ rm -rf tmp2/$KERNEL
 ./bin/kerneldiff work/kernel.raw work/kernel.patch work/kernel.diff
 ./bin/img4 -i tmp1/$KERNEL -o tmp2/$KERNEL -T krnl -J -P work/kernel.diff || true
 ./bin/img4 -i $restore_ramdisk_dmg -o work/ramdisk.raw
+ssv_prepare_restore_ramdisk
 ./bin/hfsplus work/ramdisk.raw extract usr/sbin/asr work/asr
 ./bin/asr64_patcher work/asr work/asr_patched
 ./bin/ldid -e work/asr > work/ents.plist
@@ -2030,12 +2323,14 @@ rm -rf tmp2/$KERNEL
 ./bin/hfsplus work/ramdisk.raw rm usr/sbin/asr 
 ./bin/hfsplus work/ramdisk.raw add work/asr_patched usr/sbin/asr
 ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/sbin/asr
-./bin/hfsplus work/ramdisk.raw extract usr/lib/libimg4.dylib work/libimg4.dylib
-./bin/libimg4_patcher work/libimg4.dylib work/libimg4.patch
-./bin/ldid -Swork/ents.plist work/libimg4.patch
-./bin/hfsplus work/ramdisk.raw rm usr/lib/libimg4.dylib 
-./bin/hfsplus work/ramdisk.raw add work/libimg4.patch usr/lib/libimg4.dylib
-./bin/hfsplus work/ramdisk.raw chmod 100755 usr/lib/libimg4.dylib
+if [[ $VERSION == 14.* || $VERSION == 15.* ]]; then
+    ./bin/hfsplus work/ramdisk.raw extract usr/lib/libimg4.dylib work/libimg4.dylib
+    ./bin/libimg4_patcher work/libimg4.dylib work/libimg4.patch
+    ./bin/ldid -Swork/ents.plist work/libimg4.patch
+    ./bin/hfsplus work/ramdisk.raw rm usr/lib/libimg4.dylib
+    ./bin/hfsplus work/ramdisk.raw add work/libimg4.patch usr/lib/libimg4.dylib
+    ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/lib/libimg4.dylib
+fi
 if [[ $VERSION == 15.* ]]; then
     if [[ $restored == "restored_update" ]]; then
         ramdisk_download_name="018-80166-001.dmg"
@@ -2043,6 +2338,13 @@ if [[ $VERSION == 15.* ]]; then
         ramdisk_download_name="018-79907-001.dmg"
     fi
     ramdisk_url="https://updates.cdn-apple.com/2021FallFCS/fullrestores/002-02910/AF984499-D03A-43E7-9472-6D16BA756E5E/iPhone10,3,iPhone10,6_15.0_19A346_Restore.ipsw"
+elif [[ $VERSION == 13.* ]]; then
+    if [[ $restored == "restored_update" ]]; then
+        ramdisk_download_name="048-96454-001.dmg"
+    else
+        ramdisk_download_name="048-96245-001.dmg"
+    fi
+    ramdisk_url="https://updates.cdn-apple.com/2019FallFCS/fullrestores/061-08721/B905C96C-C875-11E9-8C18-F4CC329DFA63/iPhone10,3,iPhone10,6_13.0_17A577_Restore.ipsw"
 else
     if [[ $restored == "restored_update" ]]; then
         ramdisk_download_name="048-58813-634.dmg"
@@ -2063,21 +2365,28 @@ if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12* ]] && [[ $IDENTIFIER 
     ./bin/hfsplus work/ramdisk.raw add work/restored_patch usr/local/bin/$restored
     ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/local/bin/$restored
 fi
-if [[ $VERSION == 15.* ]]; then
+ssv_install_restore_components
+if [[ $VERSION == 14.* || $VERSION == 15.* ]]; then
     ./bin/img4 -i tmp1/Firmware/$ramdisk_dmg_name.trustcache -o work/trustcache.raw
-    ./bin/trustcache append work/trustcache.raw work/restored_patch
+    if [[ $IDENTIFIER != iPhone12,8 ]]; then
+        ./bin/trustcache append work/trustcache.raw work/restored_patch
+    fi
     ./bin/trustcache append work/trustcache.raw work/asr_patched
     ./bin/trustcache append work/trustcache.raw work/libimg4.patch
-    ./bin/img4 -i work/trustcache.raw -o tmp2/Firmware/$ramdisk_dmg_name_18.trustcache -A -T rtsc
 fi
+ssv_patch_restore_trustcache
+ssv_patch_static_trustcache
+# Use a separate experimental System-patched IPSW.
+ssv_set_custom_ipsw_name
 # pack rdsk into im4p
 ./bin/img4 -i work/ramdisk.raw -o $restore_ramdisk_dmg_18 -A -T rdsk
 cd tmp2
-zip -0 -r ../custom.ipsw *
+zip -0 -r "../$CUSTOM_IPSW_NAME" *
 cd ..
 rm -rf "tmp1"
 rm -rf "tmp2"
-mv -v custom.ipsw $restoredir/custom.ipsw
+mv -v "$CUSTOM_IPSW_NAME" "$restoredir/$CUSTOM_IPSW_NAME"
+ssv_finish_ipsw_build
 rm -rf "work"
 
 }
@@ -2106,8 +2415,14 @@ sleep 5
 
 echo "Sending iBSS"
 if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12* || $IDENTIFIER == iPad11* ]]; then
-    curl -L -o bin/liter8ctl https://github.com/prdgmshift/usbliter8/raw/refs/heads/main/usbliter8ctl
-    python3 bin/liter8ctl boot $bootdir/iBSS.boot
+    curl -L -o bin/liter8ctl https://github.com/ahmadkamal09999-tech/usbliter8/raw/refs/heads/main/usbliter8ctl
+    if [[ $dist == 1 || $dist == 2 || $dist == 5 ]]; then
+        python3 bin/liter8ctl boot $bootdir/iBSS.boot || true
+        echo "If you see the error: No such device (it may have been disconnected)"
+        echo "This error is normal on Linux as long as the Device actually starts booting after iBSS is sent."
+    else
+        python3 bin/liter8ctl boot $bootdir/iBSS.boot
+    fi
     echo "Device should now boot"
     exit 0
 fi
@@ -2310,7 +2625,7 @@ elif [[ $IDENTIFIER == iPhone10* ]] && [[ $VERSION == 16.6* ]]; then
 fi
 
 if [[ $IDENTIFIER == iPad5,3 || $IDENTIFIER == iPad5,4 ]] && [[ $VERSION == 11.* || $VERSION == 12.* ]]; then
-    echo "11.3-12.4.1 downgrades are supported but they have not been integrated yet into surrealra1n $CURRENT_VERSION"
+    echo "11.3-12.4.1 downgrades are supported but they have not been integrated yet into $PROJECT_NAME $CURRENT_VERSION"
     exit 1
 fi
 
@@ -2448,11 +2763,14 @@ exit 0
 
 do_tethered_restore_a12_a13(){
 
+# fix issue on Linux
 if [[ $dist == 3 || $dist == 4 ]]; then
-    echo ""
-else
-    echo "A12 tether downgrades are unsupported on Linux"
-    exit 1
+    if [[ $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
+        echo ""
+    else
+        echo "A12/A13 downgrades are only supported on macOS 15 and later."
+        exit 1
+    fi
 fi
 
 if [[ -z "$IPSW_PATH" ]]; then
@@ -2472,63 +2790,93 @@ if [[ ! -f "$IPSW_PATH_LATEST" ]]; then
     exit 1
 fi
 
+if [[ $IDENTIFIER == iPhone11,4 ]] && [[ $VERSION == 14.1* ]]; then
+    echo "14.1 downgrades are not supported on this device"
+    exit 1
+fi
+
 if [[ $VERSION == 14.* || $VERSION == 15.* ]]; then
     echo "SEP is partially incompatible, read the following:"
     echo "The device will be unable to activate after the restore."
     echo "Sideloading outside of TrollStore may or may not work, your mileage may vary."
     echo "And potentially other broken features"
     echo "You cannot set a Passcode or use Touch ID because of BPR being enforced"
-    if [[ $IDENTIFIER == iPhone11* ]]; then
+    if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPad11* ]]; then
         echo "You will need to tether restore to 14.0 beta 4 first, activate the device, then tether restore to the desired version."
+    elif [[ $IDENTIFIER == iPhone12,8 ]]; then
+        echo "You will need to tether restore to iOS 13.4.1 - 13.7 first, activate the device (may have to activate via Finder/iTunes/Legacy iOS Kit), then tether restore to the desired version."
+        echo "You may also stay on iOS 13 if desired more than iOS 14/15."
+        echo "Haptic home button will not work."
     fi
     read -p "Press enter to continue"
-elif [[ $VERSION == 16.* || $VERSION == 17.* || $VERSION == 18.* ]]; then
-    echo "iOS 16-18 A12/A13 downgrades are not supported at the moment"
+elif [[ $VERSION == 16.* || $VERSION == 17.* || $VERSION == 18.* || $VERSION == 26.* ]]; then
+    echo "iOS 16-26 A12/A13 downgrades are not supported at the moment"
     exit 1
-elif [[ $VERSION == 13.* ]]; then
+elif [[ $VERSION == 13.* || $VERSION == 12.* ]] && [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPad11* ]]; then
+    echo "SEP is incompatible"
+    exit 1
+elif [[ $VERSION == 13.4* || $VERSION == 13.5* || $VERSION == 13.6* || $VERSION == 13.7* ]] && [[ $IDENTIFIER == iPhone12* ]]; then
+    echo "SEP is partially incompatible"
+    echo "You cannot set a Passcode or use Touch ID because of BPR being enforced"
+    echo "Haptic home button will not work, and AssistiveTouch home button will also not appear"
+    echo "On iPhone 11 models, it will be basically fully functional except for UWB, Face ID, and Passcode"
+    read -p "Press enter to continue"
+elif [[ $VERSION == 13.0* || $VERSION == 13.1* || $VERSION == 13.2* || $VERSION == 13.3* ]] && [[ $IDENTIFIER == iPhone12* ]]; then
     echo "SEP is incompatible"
     exit 1
 fi
 
-if [[ $IDENTIFIER == iPhone12* ]] && [[ $VERSION == 14.* ]]; then
-    echo "iOS 14 downgrades on A13 are not supported at the moment"
-    exit 1
+if [[ $IDENTIFIER == iPhone12,1 || $IDENTIFIER == iPhone12,3 || $IDENTIFIER == iPhone12,5 ]]; then
+    echo "UWB may or may not work."
+    echo "This means: Precise findings for AirTags and such."
+    sleep 6
 fi
 
-if [[ $VERSION == 14.* || $VERSION == 15.0* || $VERSION == 15.1* || $VERSION == 15.2* || $VERSION == 15.3* ]] && [[ $IDENTIFIER == iPhone12* ]] && [[ $IDENTIFIER != iPhone12,8 ]]; then
-    echo "Rose is very likely incompatible"
-    echo "Not continuing."
-    exit 1
-elif [[ $VERSION == 15.4* || $VERSION == 15.5* || $VERSION == 15.6* ]] && [[ $IDENTIFIER == iPhone12* ]] && [[ $IDENTIFIER != iPhone12,8 ]]; then
-    echo "iOS $LATEST_VERSION Rose may or may not be compatible"
-    echo "Proceed with very extreme caution."
-    read -p "Press enter to continue"
-fi
+ssv_prepare_runtime_for_ipsw "$IPSW_PATH"
+ssv_validate_custom_binpatches
+ssv_confirm_two_pass_restore
 
-dfu_helper_a11
+if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12* ]]; then
+    dfu_helper_a11
+else
+    dfu_helper
+fi
 pwn_device
 det_rsep_flag
 
 restoredir="restorefiles/$IDENTIFIER/$VERSION"
 
-if [[ ! -f "$restoredir/custom.ipsw" ]]; then
-    echo "Restore files does not exist, making new ones"
-    make_custom_ipsw_a12_ios14
+ssv_prepare_restore_artifacts
+curl -L -o bin/liter8ctl https://github.com/ahmadkamal09999-tech/usbliter8/raw/refs/heads/main/usbliter8ctl
+if [[ $dist == 1 || $dist == 2 || $dist == 5 ]]; then
+    python3 bin/liter8ctl boot boot/$IDENTIFIER/iBSS.patch || true
+    echo "If you see the error: No such device (it may have been disconnected)"
+    echo "This error is normal on Linux as long as the Device enters iBSS recovery mode (screen Should remain blank but be detected as Recovery mode device)."
+elif [[ $macos_ver == 27.* || $macos_ver == 26.* || $macos_ver == 15.* ]]; then
+    python3 bin/liter8ctl boot boot/$IDENTIFIER/iBSS.patch || true
+    echo "usbliter8ctl may error out."
+    echo "The error may be normal as long as the Device enters iBSS recovery mode (screen Should remain blank but be detected as Recovery mode device)."
 else
-    echo "Restore files already exist"
-    read -p "Would you like to make new ones? (y/n): " restorefiles_remake
-    if [[ $restorefiles_remake == Y || $restorefiles_remake == y ]]; then
-        rm -rf "$restoredir"
-        make_custom_ipsw_a12_ios14
-    fi
+    python3 bin/liter8ctl boot boot/$IDENTIFIER/iBSS.patch
 fi
-curl -L -o bin/liter8ctl https://github.com/prdgmshift/usbliter8/raw/refs/heads/main/usbliter8ctl
-python3 bin/liter8ctl boot boot/$IDENTIFIER/iBSS.patch
 sleep 6
+echo "Checking if device is in Recovery mode"
+MODE=$(./bin/irecovery -q | grep "^MODE:" | cut -d ':' -f2 | xargs)
+if [[ $MODE == Recovery ]]; then
+    echo "Device has been detected in Recovery mode."
+else
+    echo "Device not detected in Recovery. Exiting"
+    exit 1
+fi
 APNONCE=$(./bin/irecovery -q | grep "^NONC:" | cut -d ':' -f2 | xargs)
 ECID=$(./bin/irecovery -q | grep "^ECID:" | cut -d ':' -f2 | xargs)
 mkdir -p boot
 echo "$VERSION" > boot/$ECID.txt
+if [[ $IDENTIFIER == iPhone12,8 ]]; then
+    sudo LD_LIBRARY_PATH="lib" ./bin/idevicerestore -ey $restoredir/custom.ipsw
+    echo "Restore has finished! Read above if there are any errors"
+    exit 0
+fi
 echo "Fetching shsh blobs for iOS $LATEST_VERSION"
 rm -rf "shsh"
 mkdir -p shsh
@@ -2539,10 +2887,17 @@ if [[ -z "$SHSH_PATH" ]]; then
     echo "No SHSH file found in the shsh folder. Aborting"
     exit 1
 fi
+FUTURERESTORE_LOG="$restoredir/futurerestore-last.log"
 while true; do
     set +e
-    sudo ./futurerestore/futurerestore -t $SHSH_PATH $rsep_flag --latest-sep $updatebb_flag $restoredir/custom.ipsw
-    EXIT_CODE=$?
+    sudo ./futurerestore/futurerestore -t "$SHSH_PATH" $rsep_flag --latest-sep \
+        $updatebb_flag "$restoredir/$CUSTOM_IPSW_NAME" 2>&1 | tee "$FUTURERESTORE_LOG"
+    EXIT_CODE=${PIPESTATUS[0]}
+    if grep -Eq 'Done: restoring failed!|ERROR: Unable to successfully restore device|what=ERROR: Unable to restore device' \
+        "$FUTURERESTORE_LOG"; then
+        echo "[!] futurerestore reported a restore failure despite exit code $EXIT_CODE."
+        EXIT_CODE=1
+    fi
     set -e
     if [[ $EXIT_CODE -eq 139 ]]; then
         echo "futurerestore segfaulted (exit 139), retrying..."
@@ -2552,9 +2907,11 @@ while true; do
     fi
 done
 if [[ $EXIT_CODE -eq 0 ]]; then
+    ssv_handle_restore_success
     echo "Restore has completed! Read above if there are any errors"
     exit 0
 else
+    ssv_handle_restore_failure "$FUTURERESTORE_LOG"
     echo "futurerestore failed with exit code $EXIT_CODE"
     exit 1
 fi
@@ -2745,7 +3102,7 @@ echo "4. Battery life may be affected on iOS 7/8, because we use a workaround th
 echo "5. Potentially other broken features"
 read -p "Press enter to continue"
 if [[ $IDENTIFIER == iPhone7* || $IDENTIFIER == iPad5* || $IDENTIFIER == iPod7* ]]; then
-    echo "A8 is currently unsupported as we are rewriting surrealra1n, but it should be back eventually."
+    echo "A8 is currently unsupported while $PROJECT_NAME is being reworked, but it should return eventually."
     exit 1
 fi
 
@@ -2810,10 +3167,11 @@ echo ""
 echo "1. Select Target IPSW"
 echo "2. Select Base IPSW"
 echo "3. Start Restore"
-echo "4. Back"
-read -p "Please input an option (1-4): " tether_options
+ssv_print_menu_options
+echo "6. Back"
+read -p "Please input an option (1-6): " tether_options
 if [[ $tether_options == 1 ]]; then
-    IPSW_PATH=$($zenity --file-selection --title="Select an IPSW file")
+    IPSW_PATH=$(pick_file "Select an IPSW file")
     if [[ -z "$IPSW_PATH" ]]; then
         echo "No IPSW selected. Aborting."
         exit 1
@@ -2824,7 +3182,7 @@ if [[ $tether_options == 1 ]]; then
     VERSION=$(grep -A1 "ProductVersion" work/BuildManifest.plist | grep -o '<string>[^<]*</string>' | head -1 | sed 's/<[^>]*>//g')
     restore_tethered_opts
 elif [[ $tether_options == 2 ]]; then
-    IPSW_PATH_LATEST=$($zenity --file-selection --title="Select iOS $LATEST_VERSION IPSW file")
+    IPSW_PATH_LATEST=$(pick_file "Select iOS $LATEST_VERSION IPSW file")
     if [[ -z "$IPSW_PATH_LATEST" ]]; then
         echo "No IPSW selected. Aborting."
         exit 1
@@ -2842,7 +3200,7 @@ elif [[ $tether_options == 3 ]]; then
         do_tethered_restore_a12_a13
     elif [[ $VERSION == 7.* || $VERSION == 8.* || $VERSION == 9.* ]]; then
         if [[ $VERSION == 8.* ]]; then
-            echo "seprmvr64 restores to 8.x are not supported in surrealra1n"
+            echo "seprmvr64 restores to 8.x are not supported in $PROJECT_NAME"
             exit 1
         elif [[ $VERSION == 7.* ]]; then
             read -p "Would you like to jailbreak as part of this restore? (Y/n): " jailbreak_choice
@@ -2858,6 +3216,12 @@ elif [[ $tether_options == 3 ]]; then
         do_tethered_restore
     fi
 elif [[ $tether_options == 4 ]]; then
+    ssv_select_menu_option "$tether_options"
+    restore_tethered_opts
+elif [[ $tether_options == 5 ]]; then
+    ssv_select_menu_option "$tether_options"
+    restore_tethered_opts
+elif [[ $tether_options == 6 ]]; then
     reset_restore_vars
     restore_utils
 else
@@ -2937,7 +3301,7 @@ echo "2. Start Restore"
 echo "3. Back"
 read -p "Please input an option (1-3): " restore_a7_options_choice
 if [[ $restore_a7_options_choice == 1 ]]; then
-    IPSW_PATH=$($zenity --file-selection --title="Select an IPSW file")
+    IPSW_PATH=$(pick_file "Select an IPSW file")
     if [[ -z "$IPSW_PATH" ]]; then
         echo "No IPSW selected. Aborting."
         exit 1
@@ -2965,15 +3329,6 @@ fi
 
 restore_utils(){
 
-if [[ $outdated == 1 ]]; then
-    echo "This surrealra1n beta has expired"
-    echo "A newer beta is available. Please update to continue."
-    echo "You will need to exit, re-run surrealra1n.sh, and when it prompts for an update, update surrealra1n."
-    sleep 10
-    main_menu
-    return
-fi
-
 if [[ $IDENTIFIER == NONE ]]; then
     main_menu
     return
@@ -2987,6 +3342,10 @@ fi
 
 clear 
 echo "$INFO_TEXT"
+if [[ $outdated == 1 ]]; then
+    echo "[!] A newer $PROJECT_NAME version is available."
+    echo "[!] Continuing without updating; some features may be outdated."
+fi
 echo ""
 echo "Options:"
 echo ""
@@ -3022,7 +3381,7 @@ echo "Options:"
 echo ""
 echo "1. Downgrade Options"
 echo "2. Misc Utilities"
-echo "3. Switch to main branch"
+echo "3. Switch to development branch"
 echo "4. Exit"
 read -p "Please input an option (1-4): " option
 if [[ $option == 1 ]]; then
@@ -3032,7 +3391,7 @@ elif [[ $option == 2 ]]; then
 elif [[ $option == 3 ]]; then
     switch_to_main
 elif [[ $option == 4 ]]; then
-    echo "surrealra1n is exiting"
+    echo "$PROJECT_NAME is exiting"
     exit 0
 else
     echo "Invalid option. Exiting."

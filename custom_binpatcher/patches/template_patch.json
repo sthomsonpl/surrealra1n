@@ -1,0 +1,91 @@
+{
+  "id": "example-custom-patch",
+  "name": "Example custom binary patch",
+  "description": "Replace this description with a concise explanation of the patch.",
+  "target": "/usr/libexec/exampled",
+  "versions": [
+    {
+      "ios": "15.6.1",
+      "build": "19G82",
+      "operations": [
+        {
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    },
+    {
+      "build": "19G82",
+      "operations": [
+        {
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    },
+    {
+      "ios": "15.6.1",
+      "operations": [
+        {
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    },
+    {
+      "ios": "15.4.*",
+      "operations": [
+        {
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    },
+    {
+      "build": "19G*",
+      "operations": [
+        {
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    },
+    {
+      "ios_min": "15.1",
+      "ios_max": "15.4.1",
+      "operations": [
+        {
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    },
+    {
+      "ios_min": "15.1",
+      "ios_max": "15.4.*",
+      "operations": [
+        {
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    },
+    {
+      "default": true,
+      "operations": [
+        {
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    }
+  ]
+}
