@@ -4,3 +4,4 @@ RELEASE NOTES:
 
 -Use two-pass restores for iOS 15+ sealed System Volumes.
 -Use single-pass restores for older iOS versions.
+-Add macOS-only A12/A13 tethered downgrades for iOS 16.
