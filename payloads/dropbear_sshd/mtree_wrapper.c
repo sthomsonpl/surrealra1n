@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #ifndef MTREE_REAL_PATH
@@ -495,8 +496,42 @@ int main(int argc, char **argv) {
         inodes.launchd_cache, inodes.launchd_cache_original
     );
 
+#ifdef SURREALRAIN_EXPECT_MTREE_MISMATCH
+    pid_t child = fork();
+    if (child < 0) {
+        dprintf(STDERR_FILENO, "mtree wrapper: fork failed: %d\n", errno);
+        return 126;
+    }
+    if (child == 0) {
+        argv[0] = MTREE_REAL_PATH;
+        execv(argv[0], argv);
+        dprintf(STDERR_FILENO, "mtree wrapper: execv failed: %d\n", errno);
+        _exit(127);
+    }
+
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        dprintf(STDERR_FILENO, "mtree wrapper: waitpid failed: %d\n", errno);
+        return 126;
+    }
+    if (WIFEXITED(status)) {
+        int result = WEXITSTATUS(status);
+        if (result == 2) {
+            return 0;
+        }
+        return result;
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 126;
+#else
     argv[0] = MTREE_REAL_PATH;
     execv(argv[0], argv);
     dprintf(STDERR_FILENO, "mtree wrapper: execv failed: %d\n", errno);
     return 127;
+#endif
 }

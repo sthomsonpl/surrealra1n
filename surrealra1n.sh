@@ -2165,19 +2165,14 @@ rm -rf "work"
 
 make_custom_ipsw_a12_ios16(){
 
-# iOS 16.0.x is supported on both macOS and Linux
-# iOS 16.1+ is macOS-only due to technical difficulties (per upstream developer)
 if [[ $dist == 3 || $dist == 4 ]]; then
-    echo ""
-elif [[ $VERSION == 16.0* ]]; then
-    echo "iOS 16.0.x A12/A13 downgrade on Linux"
+    echo "A12/A13 iOS 16 downgrade on macOS"
 else
-    echo "A12/A13 iOS 16.1+ downgrades are not supported on Linux yet!"
-    echo "Only iOS 16.0.x is currently supported on Linux."
-    exit 1
+    echo "A12/A13 iOS 16 downgrade on Linux; detecting restore ramdisk filesystem"
 fi
 
 IBSS_KEY=$(grep "ibss-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
+rm -rf tmp1 tmp2 work
 mkdir -p restorefiles/$IDENTIFIER/$VERSION
 mkdir -p boot/$IDENTIFIER/$VERSION
 unzip "$IPSW_PATH" -d tmp1
@@ -2204,6 +2199,17 @@ elif [[ $VERSION == 16.1 ]]; then
 else
     restore_ramdisk_dmg=$(find_dmg tmp1 largest 148000000)
 fi
+./bin/img4 -i "$restore_ramdisk_dmg" -o work/ramdisk.dmg
+restore_ramdisk_format=$(ssv_detect_ramdisk_format work/ramdisk.dmg)
+if [[ $restore_ramdisk_format == unknown ]]; then
+    echo "[!] Unsupported restore ramdisk filesystem."
+    return 1
+fi
+if [[ $dist != 3 && $dist != 4 && $restore_ramdisk_format == apfs ]]; then
+    echo "[!] This IPSW uses an APFS restore ramdisk, which currently requires macOS."
+    return 1
+fi
+echo "[*] Detected $restore_ramdisk_format restore ramdisk."
 cryptex_os=$(find_dmg tmp1 largest 3000000000)
 cryptex_os_18=$(find_dmg_arm64e tmp2 largest 2100000000)
 cryptex_app=$(find_dmg tmp1 smallest)
@@ -2280,6 +2286,9 @@ if [[ $IDENTIFIER == iPhone12* ]]; then
     cp -v tmp1/Firmware/pmp/$PMP tmp2/Firmware/pmp/$PMP
 fi
 cp -v $fs_dmg $fs_dmg_18 # replace rootfs in the IPSW
+ssv_apply_custom_binpatches "$fs_dmg" "$fs_dmg_18"
+ssv_patch_custom_canonical_mtree \
+    "tmp2/Firmware/$fs_dmg_18_name.mtree"
 cp -v tmp1/Firmware/$fs_dmg_name.trustcache tmp2/Firmware/$fs_dmg_18_name.trustcache 
 cp -v tmp1/Firmware/$ramdisk_dmg_name.trustcache tmp2/Firmware/$ramdisk_dmg_name_18.trustcache
 # replace cryptex1 components with target cryptex (latest cryptex will not work on iOS 16)
@@ -2298,22 +2307,31 @@ cp -v tmp1/$KERNEL tmp2/$KERNEL
 # ramdisk patching: use hdiutil on macOS, hfsplus on Linux
 if [[ $dist == 3 || $dist == 4 ]]; then
     # macOS: use hdiutil to mount/modify the ramdisk DMG
-    ./bin/img4 -i $restore_ramdisk_dmg -o work/ramdisk.dmg
-    hdiutil attach work/ramdisk.dmg -mountpoint rdwork
-    cp -v rdwork/usr/sbin/asr work/asr
+    SSV_RAMDISK_IMAGE=work/ramdisk.dmg
+    SSV_RAMDISK_MOUNT=""
+    SSV_RAMDISK_TARGET_BYTES=0
+    SSV_RAMDISK_FORMAT=$restore_ramdisk_format
+    if ssv_system_patches_are_active; then
+        ssv_prepare_restore_ramdisk "$SSV_RAMDISK_IMAGE"
+    fi
+    ssv_attach_restore_ramdisk work/ramdisk.dmg rdwork
+    restore_ramdisk_mount="$SSV_RAMDISK_MOUNT"
+    cp -v "$restore_ramdisk_mount/usr/sbin/asr" work/asr
     ./bin/asr64_patcher work/asr work/asr_patched
     ./bin/ldid -e work/asr > work/ents.plist
     ./bin/ldid -Swork/ents.plist work/asr_patched
-    rm -rf rdwork/usr/sbin/asr 
-    cp -v work/asr_patched rdwork/usr/sbin/asr
-    chmod 755 rdwork/usr/sbin/asr
+    sudo rm -f "$restore_ramdisk_mount/usr/sbin/asr"
+    sudo cp -v work/asr_patched "$restore_ramdisk_mount/usr/sbin/asr"
+    sudo chown 0:0 "$restore_ramdisk_mount/usr/sbin/asr"
+    sudo chmod 755 "$restore_ramdisk_mount/usr/sbin/asr"
     #
-    cp -v rdwork/usr/lib/libimg4.dylib work/libimg4.dylib
+    cp -v "$restore_ramdisk_mount/usr/lib/libimg4.dylib" work/libimg4.dylib
     ./bin/libimg4_patcher work/libimg4.dylib work/libimg4.patch
     ./bin/ldid -Swork/ents.plist work/libimg4.patch
-    rm -rf rdwork/usr/lib/libimg4.dylib 
-    cp -v work/libimg4.patch rdwork/usr/lib/libimg4.dylib
-    chmod 755 rdwork/usr/lib/libimg4.dylib
+    sudo rm -f "$restore_ramdisk_mount/usr/lib/libimg4.dylib"
+    sudo cp -v work/libimg4.patch "$restore_ramdisk_mount/usr/lib/libimg4.dylib"
+    sudo chown 0:0 "$restore_ramdisk_mount/usr/lib/libimg4.dylib"
+    sudo chmod 755 "$restore_ramdisk_mount/usr/lib/libimg4.dylib"
     # restored patch start
     if [[ $VERSION == 16.4* || $VERSION == 16.5* || $VERSION == 16.6* ]]; then
         ramdisk_ipsw_url="https://updates.cdn-apple.com/2023SpringFCS/fullrestores/032-68311/B777E36E-32B8-4DEF-91CE-9909B04FD22D/iPhone10,3,iPhone10,6_16.4_20E247_Restore.ipsw"
@@ -2335,21 +2353,29 @@ if [[ $dist == 3 || $dist == 4 ]]; then
     ./bin/restoredpatcher work/restored_external work/restored_patch -c # patch cryptex1 install validation
     ./bin/ldid -e work/restored_external > work/ents.plist
     ./bin/ldid -Swork/ents.plist work/restored_patch
-    rm -rf rdwork/usr/local/bin/restored_external
-    cp -v work/restored_patch rdwork/usr/local/bin/restored_external
-    chmod 755 rdwork/usr/local/bin/restored_external
-    hdiutil detach rdwork
+    sudo rm -f "$restore_ramdisk_mount/usr/local/bin/restored_external"
+    sudo cp -v work/restored_patch \
+        "$restore_ramdisk_mount/usr/local/bin/restored_external"
+    sudo chown 0:0 \
+        "$restore_ramdisk_mount/usr/local/bin/restored_external"
+    sudo chmod 755 "$restore_ramdisk_mount/usr/local/bin/restored_external"
+    if ssv_system_patches_are_active; then
+        ssv_install_restore_components
+    fi
+    ssv_detach_restore_ramdisk
     # restored end
     ./bin/img4 -i tmp1/Firmware/$ramdisk_dmg_name.trustcache -o work/trustcache.raw
     ./bin/trustcache append work/trustcache.raw work/restored_patch
     ./bin/trustcache append work/trustcache.raw work/asr_patched
     ./bin/trustcache append work/trustcache.raw work/libimg4.patch
     ./bin/img4 -i work/trustcache.raw -o tmp2/Firmware/$ramdisk_dmg_name_18.trustcache -A -T rtsc
+    ssv_patch_restore_trustcache
+    ssv_patch_static_trustcache
     # pack rdsk into im4p
     ./bin/img4 -i work/ramdisk.dmg -o $restore_ramdisk_dmg_18 -A -T rdsk
 else
     # Linux: use hfsplus CLI to extract/replace files in raw HFS+ image
-    ./bin/img4 -i $restore_ramdisk_dmg -o work/ramdisk.raw
+    mv work/ramdisk.dmg work/ramdisk.raw
     ./bin/hfsplus work/ramdisk.raw extract usr/sbin/asr work/asr
     ./bin/asr64_patcher work/asr work/asr_patched
     ./bin/ldid -e work/asr > work/ents.plist
@@ -2388,11 +2414,12 @@ else
     ./bin/img4 -i work/ramdisk.raw -o $restore_ramdisk_dmg_18 -A -T rdsk
 fi
 cd tmp2
-zip -0 -r ../custom.ipsw *
+zip -0 -r "../$CUSTOM_IPSW_NAME" *
 cd ..
 rm -rf "tmp1"
 rm -rf "tmp2"
-mv -v custom.ipsw $restoredir/custom.ipsw
+mv -v "$CUSTOM_IPSW_NAME" "$restoredir/$CUSTOM_IPSW_NAME"
+ssv_finish_ipsw_build
 rm -rf "work"
 
 }
@@ -2570,6 +2597,11 @@ rm -rf tmp2/$KERNEL
 ./bin/kerneldiff work/kernel.raw work/kernel.patch work/kernel.diff
 ./bin/img4 -i tmp1/$KERNEL -o tmp2/$KERNEL -T krnl -J -P work/kernel.diff || true
 ./bin/img4 -i $restore_ramdisk_dmg -o work/ramdisk.raw
+SSV_RAMDISK_IMAGE=work/ramdisk.raw
+SSV_RAMDISK_MOUNT=""
+SSV_RAMDISK_DEVICE=""
+SSV_RAMDISK_TARGET_BYTES=0
+SSV_RAMDISK_FORMAT=$(ssv_detect_ramdisk_format "$SSV_RAMDISK_IMAGE")
 ssv_prepare_restore_ramdisk
 ./bin/hfsplus work/ramdisk.raw extract usr/sbin/asr work/asr
 ./bin/asr64_patcher work/asr work/asr_patched
@@ -3104,21 +3136,7 @@ det_rsep_flag
 
 restoredir="restorefiles/$IDENTIFIER/$VERSION"
 
-if [[ $VERSION == 16.* ]]; then
-    if [[ ! -f "$restoredir/custom.ipsw" ]]; then
-        echo "Restore files do not exist, making new ones"
-        make_custom_ipsw_a12_ios16
-    else
-        echo "Restore files already exist"
-        read -p "Would you like to make new ones? (y/n): " restorefiles_remake
-        if [[ $restorefiles_remake == Y || $restorefiles_remake == y ]]; then
-            rm -rf "$restoredir"
-            make_custom_ipsw_a12_ios16
-        fi
-    fi
-else
-    ssv_prepare_restore_artifacts
-fi
+ssv_prepare_restore_artifacts
 curl -L -o bin/liter8ctl https://github.com/ahmadkamal09999-tech/usbliter8/raw/refs/heads/main/usbliter8ctl
 if [[ $dist == 1 || $dist == 2 || $dist == 5 ]]; then
     python3 bin/liter8ctl boot boot/$IDENTIFIER/iBSS.patch || true
@@ -3144,11 +3162,32 @@ APNONCE=$(./bin/irecovery -q | grep "^NONC:" | cut -d ':' -f2 | xargs)
 ECID=$(./bin/irecovery -q | grep "^ECID:" | cut -d ':' -f2 | xargs)
 mkdir -p boot
 echo "$VERSION" > boot/$ECID.txt
-if [[ $IDENTIFIER == iPhone12,8 ]]; then
-    sudo LD_LIBRARY_PATH="lib" ./bin/idevicerestore -ey $restoredir/custom.ipsw
-    echo "Restore has finished! Read above if there are any errors"
-    exit 0
-elif [[ $VERSION == 16.* ]] && [[ $IDENTIFIER != iPhone12,8 ]]; then
+if [[ $VERSION == 16.* ]]; then
+    IDEVICERESTORE_LOG="$restoredir/idevicerestore-last.log"
+    set +e
+    sudo LD_LIBRARY_PATH="lib" ./bin/idevicerestore -ey \
+        "$restoredir/$CUSTOM_IPSW_NAME" 2>&1 | tee "$IDEVICERESTORE_LOG"
+    EXIT_CODE=${PIPESTATUS[0]}
+    set -e
+    if ssv_requires_seal_sync && \
+            ssv_restore_log_has_seal_data "$IDEVICERESTORE_LOG" "$SSHD_DEV"; then
+        ssv_handle_restore_failure "$IDEVICERESTORE_LOG"
+        echo "[*] The IPSW is ready for sealed System restore pass 2/2."
+        exit 1
+    fi
+    if [[ $EXIT_CODE -eq 0 ]]; then
+        ssv_handle_restore_success
+        echo "Restore has finished! Read above if there are any errors"
+        exit 0
+    fi
+    ssv_handle_restore_failure "$IDEVICERESTORE_LOG"
+    if ssv_requires_seal_sync; then
+        echo "[!] idevicerestore did not expose the APFS seal data required for pass 2."
+        echo "[!] The IPSW was not modified; inspect $IDEVICERESTORE_LOG before retrying."
+    fi
+    echo "idevicerestore failed with exit code $EXIT_CODE"
+    exit 1
+elif [[ $IDENTIFIER == iPhone12,8 ]]; then
     sudo LD_LIBRARY_PATH="lib" ./bin/idevicerestore -ey $restoredir/custom.ipsw
     echo "Restore has finished! Read above if there are any errors"
     exit 0
@@ -3673,4 +3712,3 @@ fi
 }
 
 main_menu
-
