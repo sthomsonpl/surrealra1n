@@ -1815,6 +1815,12 @@ else
     dfu_helper
 fi
 
+if [[ $skip_blob_set == 1 ]]; then
+    use_skip_blob="--skip-blob"
+else
+    use_skip_blob=""
+fi
+
 pwn_device
 det_rsep_flag
 
@@ -1834,7 +1840,7 @@ if [[ $IDENTIFIER == iPhone7* || $IDENTIFIER == iPad5* || $IDENTIFIER == iPod7* 
             sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
                 ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
                 --sep $sep_path --sep-manifest $manifest_path \
-                --custom-latest $LATEST_VERSION \
+                --custom-latest $LATEST_VERSION $use_skip_blob \
                 $updatebb_flag $rsep_flag --rkrn work/kernel.im4p $IPSW_PATH
             EXIT_CODE=$?
             set -e
@@ -1859,7 +1865,7 @@ if [[ $IDENTIFIER == iPhone7* || $IDENTIFIER == iPad5* || $IDENTIFIER == iPod7* 
         sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
             ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
             --sep $sep_path --sep-manifest $manifest_path \
-            --custom-latest $LATEST_VERSION \
+            --custom-latest $LATEST_VERSION $use_skip_blob \
             $updatebb_flag --no-rsep $IPSW_PATH
         EXIT_CODE=$?
         set -e
@@ -1878,7 +1884,7 @@ elif [[ $IDENTIFIER == iPad4* || $IDENTIFIER == iPhone6* ]] && [[ $VERSION == 10
         sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
             ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
             --sep $sep_path --sep-manifest $manifest_path \
-            --custom-latest $LATEST_VERSION \
+            --custom-latest $LATEST_VERSION $use_skip_blob \
             $updatebb_flag --no-rsep $IPSW_PATH
         EXIT_CODE=$?
         set -e
@@ -1897,7 +1903,7 @@ elif [[ $IDENTIFIER == iPad5* ]] && [[ $VERSION == 11.* || $VERSION == 12.* ]]; 
         sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
             ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
             --sep $sep_path --sep-manifest $manifest_path \
-            --custom-latest $LATEST_VERSION \
+            --custom-latest $LATEST_VERSION $use_skip_blob \
             $updatebb_flag --no-rsep $IPSW_PATH
         EXIT_CODE=$?
         set -e
@@ -1915,7 +1921,7 @@ else
         sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
             ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
             --latest-sep \
-            --custom-latest $LATEST_VERSION \
+            --custom-latest $LATEST_VERSION $use_skip_blob \
             $updatebb_flag --no-rsep $IPSW_PATH
         EXIT_CODE=$?
         set -e
@@ -1966,6 +1972,15 @@ elif [[ $untether_options == 2 ]]; then
     restore_untethered_opts
 elif [[ $untether_options == 3 ]]; then
     sep_checker
+    read -p "Would you like to enable skip-blob for this restore? (y/n): " skip_blob_det
+    if [[ $skip_blob_det == y || $skip_blob_det == Y ]]; then
+        echo "Enabling --skip-blob option for this restore."
+        echo "WARNING: This skips blob validation, ENSURE your SHSH is valid!"
+        sleep 5
+        skip_blob_set=1
+    else
+        skip_blob_set=0
+    fi
     restore_with_blobs
 elif [[ $untether_options == 4 ]]; then
     reset_restore_vars
