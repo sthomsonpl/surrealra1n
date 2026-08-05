@@ -15,7 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATCH_DIR = os.path.join(SCRIPT_DIR, "patches")
 DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "patches.json")
 DEFAULT_SIGN_TOOL = os.path.join(os.path.dirname(SCRIPT_DIR), "bin", "ldid")
-TEMPLATE_PATCH = "template_patch.json"
+TEMPLATE_PATCHES = {"template_patch.json", "template_multi_target_patch.json"}
 
 
 def load_json(path):
@@ -31,7 +31,7 @@ def load_patches(patch_dir):
         raise ValueError(f"patch directory does not exist: {patch_dir}")
     patches = {}
     for path in sorted(glob.glob(os.path.join(patch_dir, "*.json"))):
-        if os.path.basename(path) == TEMPLATE_PATCH:
+        if os.path.basename(path) in TEMPLATE_PATCHES:
             continue
         patch = load_json(path)
         if not isinstance(patch, dict):
@@ -41,8 +41,23 @@ def load_patches(patch_dir):
             raise ValueError(f"{path}: missing id")
         if patch_id in patches:
             raise ValueError(f"duplicate patch id: {patch_id}")
-        if not isinstance(patch.get("target"), str) or not patch["target"]:
-            raise ValueError(f"{path}: missing target")
+        target = patch.get("target")
+        targets = patch.get("targets")
+        has_target = isinstance(target, str) and bool(target)
+        if target is not None and not has_target:
+            raise ValueError(f"{path}: target must be a non-empty string")
+        if targets is not None:
+            if has_target:
+                raise ValueError(f"{path}: cannot combine target and targets")
+            if not isinstance(targets, dict) or not targets:
+                raise ValueError(f"{path}: targets must be a non-empty object")
+            for alias, target_path in targets.items():
+                if not isinstance(alias, str) or not alias:
+                    raise ValueError(f"{path}: target aliases must be non-empty strings")
+                if not isinstance(target_path, str) or not target_path:
+                    raise ValueError(f"{path}: target {alias!r} must be a non-empty string")
+        elif not has_target:
+            raise ValueError(f"{path}: missing target or targets")
         versions = patch.get("versions")
         if not isinstance(versions, list) or not versions:
             raise ValueError(f"{path}: missing versions")
@@ -251,19 +266,38 @@ def collect_groups(patches, config, system_root, ios, build):
         if not isinstance(operations, list) or not operations:
             raise ValueError(f"{patch_id}: variant has no operations")
 
-        actual, display = target_paths(system_root, patch["target"])
-        group = groups.setdefault(
-            actual,
-            {
-                "target": patch["target"],
-                "display": display,
-                "operations": [],
-                "reports": [],
-            },
-        )
+        multi_target = "targets" in patch
         for operation in operations:
             if not isinstance(operation, dict):
                 raise ValueError(f"{patch_id}: operation must be a JSON object")
+            if multi_target:
+                target_alias = operation.get("target")
+                if not isinstance(target_alias, str) or not target_alias:
+                    raise ValueError(
+                        f"{patch_id}: multi-target operation is missing target"
+                    )
+                if target_alias not in patch["targets"]:
+                    raise ValueError(
+                        f"{patch_id}: operation references unknown target {target_alias!r}"
+                    )
+                target = patch["targets"][target_alias]
+            else:
+                if "target" in operation:
+                    raise ValueError(
+                        f"{patch_id}: operation target requires a top-level "
+                        "targets object"
+                    )
+                target = patch["target"]
+            actual, display = target_paths(system_root, target)
+            group = groups.setdefault(
+                actual,
+                {
+                    "target": target,
+                    "display": display,
+                    "operations": [],
+                    "reports": [],
+                },
+            )
             offset = parse_offset(operation.get("offset"), patch_id)
             expected = parse_hex(operation.get("expected"), "expected", patch_id)
             replace = parse_hex(operation.get("replace"), "replace", patch_id)

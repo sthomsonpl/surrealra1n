@@ -23,6 +23,9 @@ cp custom_binpatcher/patches/template_patch.json \
   custom_binpatcher/patches/my-patch.json
 ```
 
+For a patch that changes more than one binary, start from
+`template_multi_target_patch.json` instead.
+
 Edit the copied file, then run the configurator:
 
 ```sh
@@ -62,7 +65,7 @@ image when its configuration has not changed.
 
 ## Patch format
 
-Each patch definition is one JSON object:
+Each patch definition is one JSON object. The original single-target format is:
 
 ```json
 {
@@ -93,6 +96,49 @@ Each patch definition is one JSON object:
 - `offset` is a file offset, not a virtual address.
 - `expected` and `replace` are hexadecimal byte strings of equal length.
 - Hexadecimal strings may contain spaces or be written without spaces.
+
+### Multi-target patches
+
+For one logical patch that changes multiple binaries, define stable target aliases
+at the top level and select an alias on every operation:
+
+```json
+{
+  "id": "example-multi-target-patch",
+  "name": "Example multi-target binary patch",
+  "description": "Replace this description with a concise explanation of the patch.",
+  "targets": {
+    "daemon-a": "/usr/libexec/exampled-a",
+    "daemon-b": "/usr/libexec/exampled-b"
+  },
+  "versions": [
+    {
+      "ios": "15.6.1",
+      "build": "19G82",
+      "operations": [
+        {
+          "target": "daemon-a",
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        },
+        {
+          "target": "daemon-b",
+          "offset": "0x5678",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    }
+  ]
+}
+```
+
+- Use either top-level `target` (single-target) or `targets` (multi-target), not both.
+- `targets` maps a non-empty alias to an absolute path inside the iOS System volume.
+- Every multi-target operation must contain `target`, whose value is a declared alias.
+- Version selectors apply to the patch as a whole; target paths do not need to be repeated per version.
+- Existing single-target definitions retain their current format and behavior.
 
 Do not leave example selectors or the example `default` variant in a real patch
 unless they have verified offsets and bytes.
@@ -127,8 +173,9 @@ wins. A variant cannot combine `ios` with `ios_min` or `ios_max`.
 
 ## Operations and safety
 
-Multiple operations may be included in one variant. Multiple enabled patches
-may also target the same binary. The patcher groups them by target and then:
+Multiple operations may be included in one variant, including operations for
+different aliases in a multi-target patch. Multiple enabled patches may also target
+the same binary. The patcher groups them by resolved target and then:
 
 1. reads the original binary into memory;
 2. validates every offset and every `expected` byte;

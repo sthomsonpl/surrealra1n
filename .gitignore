@@ -36,3 +36,4 @@ __pycache__/
 /custom_binpatcher/patches.json
 /custom_binpatcher/patches/*.json
 !/custom_binpatcher/patches/template_patch.json
+!/custom_binpatcher/patches/template_multi_target_patch.json

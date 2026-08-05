@@ -1,0 +1,29 @@
+{
+  "id": "example-multi-target-patch",
+  "name": "Example multi-target binary patch",
+  "description": "Replace this description with a concise explanation of the patch.",
+  "targets": {
+    "daemon-a": "/usr/libexec/exampled-a",
+    "daemon-b": "/usr/libexec/exampled-b"
+  },
+  "versions": [
+    {
+      "ios": "15.6.1",
+      "build": "19G82",
+      "operations": [
+        {
+          "target": "daemon-a",
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        },
+        {
+          "target": "daemon-b",
+          "offset": "0x5678",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    }
+  ]
+}
