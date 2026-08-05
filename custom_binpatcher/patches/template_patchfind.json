@@ -1,0 +1,24 @@
+{
+  "id": "example-patchfind-patch",
+  "name": "Example patchfind binary patch",
+  "description": "Replace this description with a concise explanation of the patch.",
+  "target": "/usr/libexec/exampled",
+  "patchfind": [
+    {
+      "objc_method": {
+        "class": "ExampleClass",
+        "selector": "exampleProperty"
+      },
+      "instruction": {
+        "mnemonic": "LDRB",
+        "destination": "W0",
+        "memory": {
+          "base": "X0",
+          "offset": "*"
+        }
+      },
+      "match": "unique",
+      "replace": "20 00 80 52"
+    }
+  ]
+}

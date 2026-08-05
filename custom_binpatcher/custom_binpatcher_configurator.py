@@ -12,7 +12,11 @@ import tempfile
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATCH_DIR = os.path.join(SCRIPT_DIR, "patches")
 DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "patches.json")
-TEMPLATE_PATCHES = {"template_patch.json", "template_multi_target_patch.json"}
+TEMPLATE_PATCHES = {
+    "template_patch.json",
+    "template_multi_target_patch.json",
+    "template_patchfind.json",
+}
 
 
 def load_json(path, missing=None):
@@ -91,7 +95,7 @@ def show_menu(patches, config, dirty):
             print(f"    {patch['description']}")
     else:
         print("No custom patch definitions found.")
-        print(f"Copy {TEMPLATE_PATCH} to a new JSON file to create one.")
+        print("Copy template_patch.json to a new JSON file to create one.")
     print("\n[S] Save")
     print("[R] Rescan")
     print("[Q] Quit")
