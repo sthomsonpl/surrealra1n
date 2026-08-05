@@ -150,8 +150,8 @@ ssv_configure_runtime_for_volume() {
     ssv_apply_config
     if ! ssv_ios15_features_are_supported; then
         if [[ $SSHD_DEV -eq 1 ]]; then
-            echo "[!] SSH/Dropbear requires a sealed System Volume on iOS 15+."
-            echo "[*] SSH/Dropbear is disabled for this restore."
+            echo "[!] SSH Dropbear requires a sealed System Volume on iOS 15+."
+            echo "[*] SSH Dropbear is disabled for this restore."
         fi
         SSHD_DEV=0
     fi
@@ -215,9 +215,9 @@ ssv_config_menu() {
             echo ""
         fi
         if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
-            echo "1. SSH patches (iOS 15+) [ON]"
+            echo "1. SSH Dropbear (iOS 15+) [ON]"
         else
-            echo "1. SSH patches (iOS 15+) [OFF]"
+            echo "1. SSH Dropbear (iOS 15+) [OFF]"
         fi
         if [[ $SSV_CONFIG_CUSTOM_BINPATCHES -eq 1 ]]; then
             echo "2. Custom Binpatches [ON]"
@@ -679,10 +679,10 @@ PY
 ssv_toggle_ssh(){
     if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
         SSV_CONFIG_SSHD=0
-        echo "[*] Experimental System SSH patches: OFF"
+        echo "[*] SSH Dropbear: OFF"
     else
         SSV_CONFIG_SSHD=1
-        echo "[*] Experimental System SSH patches: ON"
+        echo "[*] SSH Dropbear: ON"
         echo "[!] Device and iOS compatibility is not guaranteed."
         echo "[!] Sealed System Volumes on iOS 15+ require two restore attempts."
         echo "[!] The first pass captures the root hash; the second completes the restore."
