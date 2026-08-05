@@ -2,7 +2,7 @@
 PROJECT_NAME="Surrealra1nForge"
 PROJECT_REPOSITORY="https://github.com/sthomsonpl/Surrealra1nForge"
 EXPERIMENTAL_UPDATE_REPOSITORY="$PROJECT_REPOSITORY.git"
-CURRENT_VERSION="v1.1b1"
+CURRENT_VERSION="v1.1b2"
 
 if [ "$EUID" -eq 0 ]; then
   echo "ERROR: Do not run this script with sudo or as root."
