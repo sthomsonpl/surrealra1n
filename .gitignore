@@ -38,4 +38,5 @@ __pycache__/
 !/custom_binpatcher/patches/template_patch.json
 !/custom_binpatcher/patches/template_multi_target_patch.json
 !/custom_binpatcher/patches/template_patchfind.json
-
+restore_*.log
+payloads/dropbear_sshd/payload-metadata.json
