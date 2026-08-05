@@ -15,7 +15,14 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATCH_DIR = os.path.join(SCRIPT_DIR, "patches")
 DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "patches.json")
 DEFAULT_SIGN_TOOL = os.path.join(os.path.dirname(SCRIPT_DIR), "bin", "ldid")
-TEMPLATE_PATCH = "template_patch.json"
+DEFAULT_PATCHFINDER_TOOL = os.path.join(
+    os.path.dirname(SCRIPT_DIR), "bin", "custombin_patchfinder"
+)
+TEMPLATE_PATCHES = {
+    "template_patch.json",
+    "template_multi_target_patch.json",
+    "template_patchfind.json",
+}
 
 
 def load_json(path):
@@ -31,7 +38,7 @@ def load_patches(patch_dir):
         raise ValueError(f"patch directory does not exist: {patch_dir}")
     patches = {}
     for path in sorted(glob.glob(os.path.join(patch_dir, "*.json"))):
-        if os.path.basename(path) == TEMPLATE_PATCH:
+        if os.path.basename(path) in TEMPLATE_PATCHES:
             continue
         patch = load_json(path)
         if not isinstance(patch, dict):
@@ -41,11 +48,33 @@ def load_patches(patch_dir):
             raise ValueError(f"{path}: missing id")
         if patch_id in patches:
             raise ValueError(f"duplicate patch id: {patch_id}")
-        if not isinstance(patch.get("target"), str) or not patch["target"]:
-            raise ValueError(f"{path}: missing target")
+        target = patch.get("target")
+        targets = patch.get("targets")
+        has_target = isinstance(target, str) and bool(target)
+        if target is not None and not has_target:
+            raise ValueError(f"{path}: target must be a non-empty string")
+        if targets is not None:
+            if has_target:
+                raise ValueError(f"{path}: cannot combine target and targets")
+            if not isinstance(targets, dict) or not targets:
+                raise ValueError(f"{path}: targets must be a non-empty object")
+            for alias, target_path in targets.items():
+                if not isinstance(alias, str) or not alias:
+                    raise ValueError(f"{path}: target aliases must be non-empty strings")
+                if not isinstance(target_path, str) or not target_path:
+                    raise ValueError(f"{path}: target {alias!r} must be a non-empty string")
+        elif not has_target:
+            raise ValueError(f"{path}: missing target or targets")
         versions = patch.get("versions")
-        if not isinstance(versions, list) or not versions:
-            raise ValueError(f"{path}: missing versions")
+        patchfind = patch.get("patchfind")
+        if versions is not None and (not isinstance(versions, list) or not versions):
+            raise ValueError(f"{path}: versions must be a non-empty list")
+        if patchfind is not None and (
+            not isinstance(patchfind, list) or not patchfind
+        ):
+            raise ValueError(f"{path}: patchfind must be a non-empty list")
+        if versions is None and patchfind is None:
+            raise ValueError(f"{path}: missing versions or patchfind")
         patches[patch_id] = patch
     return patches
 
@@ -236,7 +265,165 @@ def target_paths(system_root, target):
     return actual, display
 
 
-def collect_groups(patches, config, system_root, ios, build):
+def item_target(patch, item, patch_id, kind):
+    if "targets" in patch:
+        target_alias = item.get("target")
+        if not isinstance(target_alias, str) or not target_alias:
+            raise ValueError(f"{patch_id}: multi-target {kind} is missing target")
+        if target_alias not in patch["targets"]:
+            raise ValueError(
+                f"{patch_id}: {kind} references unknown target {target_alias!r}"
+            )
+        return patch["targets"][target_alias]
+    if "target" in item:
+        raise ValueError(
+            f"{patch_id}: {kind} target requires a top-level targets object"
+        )
+    return patch["target"]
+
+
+def patchfinder_arguments(path, finder, patch_id):
+    if not isinstance(finder, dict):
+        raise ValueError(f"{patch_id}: patchfind entry must be a JSON object")
+    command = ["--input", path]
+    function = finder.get("function")
+    objc_method = finder.get("objc_method")
+    cstring_xref = finder.get("cstring_xref")
+    if sum(value is not None for value in (function, objc_method, cstring_xref)) != 1:
+        raise ValueError(
+            f"{patch_id}: patchfind requires exactly one function, objc_method, "
+            "or cstring_xref"
+        )
+    if function is not None:
+        if not isinstance(function, str) or not function:
+            raise ValueError(
+                f"{patch_id}: patchfind function must be a non-empty string"
+            )
+        command.extend(("--function", function))
+    elif objc_method is not None:
+        if not isinstance(objc_method, dict):
+            raise ValueError(f"{patch_id}: objc_method must be a JSON object")
+        class_name = objc_method.get("class")
+        selector = objc_method.get("selector")
+        method_kind = objc_method.get("kind", "instance")
+        if not isinstance(class_name, str) or not class_name:
+            raise ValueError(f"{patch_id}: objc_method is missing class")
+        if not isinstance(selector, str) or not selector:
+            raise ValueError(f"{patch_id}: objc_method is missing selector")
+        if method_kind not in ("instance", "class"):
+            raise ValueError(
+                f"{patch_id}: objc_method kind must be instance or class"
+            )
+        command.extend(
+            (
+                "--objc-class",
+                class_name,
+                "--selector",
+                selector,
+                "--method-kind",
+                method_kind,
+            )
+        )
+    else:
+        if not isinstance(cstring_xref, str) or not cstring_xref:
+            raise ValueError(
+                f"{patch_id}: cstring_xref must be a non-empty string"
+            )
+        command.extend(("--cstring-xref", cstring_xref))
+
+    if finder.get("match", "unique") != "unique":
+        raise ValueError(f"{patch_id}: only patchfind match=unique is supported")
+    instruction = finder.get("instruction")
+    if not isinstance(instruction, dict):
+        raise ValueError(f"{patch_id}: patchfind is missing instruction")
+    mnemonic = instruction.get("mnemonic")
+    if not isinstance(mnemonic, str) or not mnemonic:
+        raise ValueError(f"{patch_id}: instruction is missing mnemonic")
+    command.extend(("--mnemonic", mnemonic.upper()))
+    for field, option in (("destination", "--destination"), ("source", "--source")):
+        value = instruction.get(field)
+        if value is not None:
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{patch_id}: instruction {field} must be a string")
+            command.extend((option, value))
+    immediate = instruction.get("immediate")
+    if immediate is not None:
+        if not isinstance(immediate, (str, int)) or isinstance(immediate, bool):
+            raise ValueError(f"{patch_id}: instruction immediate is invalid")
+        command.extend(("--immediate", str(immediate)))
+    condition = instruction.get("condition")
+    if condition is not None:
+        if not isinstance(condition, str) or not condition:
+            raise ValueError(f"{patch_id}: instruction condition must be a string")
+        command.extend(("--condition", condition))
+    memory = instruction.get("memory")
+    if memory is not None:
+        if not isinstance(memory, dict):
+            raise ValueError(f"{patch_id}: instruction memory must be an object")
+        base = memory.get("base")
+        offset = memory.get("offset")
+        if base is not None:
+            if not isinstance(base, str) or not base:
+                raise ValueError(f"{patch_id}: memory base must be a string")
+            command.extend(("--base", base))
+        if offset is not None:
+            if not isinstance(offset, (str, int)) or isinstance(offset, bool):
+                raise ValueError(f"{patch_id}: memory offset is invalid")
+            command.extend(("--offset", str(offset)))
+    return command
+
+
+def resolve_patchfind(tool, path, finder, patch_id):
+    command = [tool] + patchfinder_arguments(path, finder, patch_id)
+    try:
+        result = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+    except OSError as error:
+        raise ValueError(f"cannot run patchfinder {tool}: {error}") from error
+    if result.returncode != 0:
+        message = result.stderr.strip() or f"exit code {result.returncode}"
+        raise ValueError(f"{patch_id}: patchfind failed: {message}")
+    try:
+        resolved = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{patch_id}: patchfinder returned invalid JSON") from error
+    if not isinstance(resolved, dict) or resolved.get("status") != "found":
+        raise ValueError(f"{patch_id}: patchfinder did not return a match")
+    offset = parse_offset(resolved.get("file_offset"), patch_id)
+    expected = parse_hex(resolved.get("bytes"), "patchfind bytes", patch_id)
+    if resolved.get("matches") != 1 or resolved.get("size") != len(expected):
+        raise ValueError(f"{patch_id}: patchfinder returned inconsistent match data")
+    return offset, expected
+
+
+def add_group_item(groups, patch, patch_id, label, target, operation):
+    actual, display = target_paths(operation["system_root"], target)
+    group = groups.setdefault(
+        actual,
+        {
+            "target": target,
+            "display": display,
+            "operations": [],
+            "reports": [],
+        },
+    )
+    item = {
+        "patch_id": patch_id,
+        "name": patch.get("name", patch_id),
+        "variant": label,
+        "kind": operation["kind"],
+        "offset": operation["offset"],
+        "expected": operation["expected"],
+        "replace": operation["replace"],
+    }
+    group["operations"].append(item)
+    group["reports"].append(item)
+
+
+def collect_groups(
+    patches, config, system_root, ios, build, patchfinder_tool=DEFAULT_PATCHFINDER_TOOL
+):
     groups = {}
     for patch_id, enabled in config.items():
         if not enabled:
@@ -244,43 +431,83 @@ def collect_groups(patches, config, system_root, ios, build):
         if patch_id not in patches:
             raise ValueError(f"enabled patch has no definition: {patch_id}")
         patch = patches[patch_id]
-        variant = select_variant(patch, ios, build)
-        if variant is None:
-            raise ValueError(f"{patch_id}: no matching version")
-        operations = variant.get("operations")
-        if not isinstance(operations, list) or not operations:
-            raise ValueError(f"{patch_id}: variant has no operations")
+        sources = []
+        if "patchfind" in patch:
+            sources.append((patch, "patchfind"))
+        if "versions" in patch:
+            variant = select_variant(patch, ios, build)
+            if variant is None:
+                if not sources:
+                    raise ValueError(f"{patch_id}: no matching version")
+            else:
+                sources.append((variant, variant_label(variant)))
 
-        actual, display = target_paths(system_root, patch["target"])
-        group = groups.setdefault(
-            actual,
-            {
-                "target": patch["target"],
-                "display": display,
-                "operations": [],
-                "reports": [],
-            },
-        )
-        for operation in operations:
-            if not isinstance(operation, dict):
-                raise ValueError(f"{patch_id}: operation must be a JSON object")
-            offset = parse_offset(operation.get("offset"), patch_id)
-            expected = parse_hex(operation.get("expected"), "expected", patch_id)
-            replace = parse_hex(operation.get("replace"), "replace", patch_id)
-            if len(expected) != len(replace):
+        for source, label in sources:
+            operations = source.get("operations", [])
+            finders = source.get("patchfind", [])
+            if not isinstance(operations, list) or not isinstance(finders, list):
                 raise ValueError(
-                    f"{patch_id}: expected and replace have different lengths"
+                    f"{patch_id}: operations and patchfind must be lists"
                 )
-            item = {
-                "patch_id": patch_id,
-                "name": patch.get("name", patch_id),
-                "variant": variant_label(variant),
-                "offset": offset,
-                "expected": expected,
-                "replace": replace,
-            }
-            group["operations"].append(item)
-            group["reports"].append(item)
+            if not operations and not finders:
+                raise ValueError(f"{patch_id}: selected patch has no operations")
+            for operation in operations:
+                if not isinstance(operation, dict):
+                    raise ValueError(f"{patch_id}: operation must be a JSON object")
+                target = item_target(patch, operation, patch_id, "operation")
+                expected = parse_hex(
+                    operation.get("expected"), "expected", patch_id
+                )
+                replace = parse_hex(operation.get("replace"), "replace", patch_id)
+                if len(expected) != len(replace):
+                    raise ValueError(
+                        f"{patch_id}: expected and replace have different lengths"
+                    )
+                add_group_item(
+                    groups,
+                    patch,
+                    patch_id,
+                    label,
+                    target,
+                    {
+                        "system_root": system_root,
+                        "kind": "offset",
+                        "offset": parse_offset(operation.get("offset"), patch_id),
+                        "expected": expected,
+                        "replace": replace,
+                    },
+                )
+            for finder in finders:
+                if not isinstance(finder, dict):
+                    raise ValueError(
+                        f"{patch_id}: patchfind entry must be a JSON object"
+                    )
+                target = item_target(patch, finder, patch_id, "patchfind entry")
+                actual, _ = target_paths(system_root, target)
+                if not os.path.isfile(actual):
+                    raise ValueError(f"target does not exist: {actual}")
+                offset, expected = resolve_patchfind(
+                    patchfinder_tool, actual, finder, patch_id
+                )
+                replace = parse_hex(finder.get("replace"), "replace", patch_id)
+                if len(expected) != len(replace):
+                    raise ValueError(
+                        f"{patch_id}: patchfind match and replace have different lengths"
+                    )
+                add_group_item(
+                    groups,
+                    patch,
+                    patch_id,
+                    label,
+                    target,
+                    {
+                        "system_root": system_root,
+                        "kind": "patchfind",
+                        "offset": offset,
+                        "expected": expected,
+                        "replace": replace,
+                    },
+                )
     return groups
 
 
@@ -474,6 +701,7 @@ def print_reports(groups, signing, status):
             print(f"Patch: {item['name']}")
             print(f"Target: {group['display']}")
             print(f"Variant: {item['variant']}")
+            print(f"Resolved by: {item['kind']}")
             print(f"Offset: 0x{item['offset']:x}")
             print(f"Before: {item['expected'].hex(' ')}")
             print(f"After:  {item['replace'].hex(' ')}")
@@ -502,6 +730,11 @@ def parse_args():
     parser.add_argument(
         "--sign-tool", default=DEFAULT_SIGN_TOOL, help="ldid-compatible signing tool"
     )
+    parser.add_argument(
+        "--patchfinder-tool",
+        default=DEFAULT_PATCHFINDER_TOOL,
+        help="custombin_patchfinder-compatible executable",
+    )
     parser.add_argument("--backup-dir", help="optional external backup directory")
     parser.add_argument(
         "--metadata-output", help="write changed targets and inode numbers as JSON"
@@ -525,7 +758,14 @@ def main():
             return 0
         if not args.system_root:
             raise ValueError("--system-root is required unless --list is used")
-        groups = collect_groups(patches, config, args.system_root, args.ios, args.build)
+        groups = collect_groups(
+            patches,
+            config,
+            args.system_root,
+            args.ios,
+            args.build,
+            args.patchfinder_tool,
+        )
         if not groups:
             print("No enabled patches.")
             return 0

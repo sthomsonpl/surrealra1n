@@ -12,7 +12,7 @@ Only Python 3 and the tools already bundled with Surrealra1nForge are required.
 Patch definitions and their enabled states are local files and are intentionally
 ignored by Git:
 
-- `patches/*.json`, except `patches/template_patch.json`
+- `patches/*.json`, except tracked templates and bundled patch definitions
 - `patches.json`
 
 The template is documentation and is skipped by both the patcher and the
@@ -22,6 +22,10 @@ configurator. Copy it to create a real patch:
 cp custom_binpatcher/patches/template_patch.json \
   custom_binpatcher/patches/my-patch.json
 ```
+
+For a patch that changes more than one binary, start from
+`template_multi_target_patch.json` instead.
+For instruction-based discovery, use `template_patchfind.json`.
 
 Edit the copied file, then run the configurator:
 
@@ -62,7 +66,7 @@ image when its configuration has not changed.
 
 ## Patch format
 
-Each patch definition is one JSON object:
+Each patch definition is one JSON object. The original single-target format is:
 
 ```json
 {
@@ -93,6 +97,115 @@ Each patch definition is one JSON object:
 - `offset` is a file offset, not a virtual address.
 - `expected` and `replace` are hexadecimal byte strings of equal length.
 - Hexadecimal strings may contain spaces or be written without spaces.
+
+### Multi-target patches
+
+For one logical patch that changes multiple binaries, define stable target aliases
+at the top level and select an alias on every operation:
+
+```json
+{
+  "id": "example-multi-target-patch",
+  "name": "Example multi-target binary patch",
+  "description": "Replace this description with a concise explanation of the patch.",
+  "targets": {
+    "daemon-a": "/usr/libexec/exampled-a",
+    "daemon-b": "/usr/libexec/exampled-b"
+  },
+  "versions": [
+    {
+      "ios": "15.6.1",
+      "build": "19G82",
+      "operations": [
+        {
+          "target": "daemon-a",
+          "offset": "0x1234",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        },
+        {
+          "target": "daemon-b",
+          "offset": "0x5678",
+          "expected": "00 00 80 52",
+          "replace": "20 00 80 52"
+        }
+      ]
+    }
+  ]
+}
+```
+
+- Use either top-level `target` (single-target) or `targets` (multi-target), not both.
+- `targets` maps a non-empty alias to an absolute path inside the iOS System volume.
+- Every multi-target operation must contain `target`, whose value is a declared alias.
+- Version selectors apply to the patch as a whole; target paths do not need to be repeated per version.
+- Existing single-target definitions retain their current format and behavior.
+
+### Patchfind patches
+
+`patchfind` is an alternative to fixed file offsets. It is always a list and may
+be declared directly on a patch or inside a version variant. The compiled
+`custombin_patchfinder` resolves an Objective-C method, function symbol, or a
+function referencing an exact C string, matches one ARM64 instruction
+semantically, and returns its current file offset and bytes. `replace` remains
+a fixed hexadecimal byte string.
+
+The standalone source, build instructions, CLI reference, and output schema are
+documented in [`patchfinder/README.md`](patchfinder/README.md).
+The standalone `--gen` mode can also reverse-map a known file offset and byte
+sequence to its containing Objective-C method/function and generalized
+instruction matcher.
+
+Use `"function": "_symbol_name"` instead of `objc_method` for a Mach-O
+function symbol. Objective-C methods accept an optional `"kind": "class"`;
+the default is `"instance"`. For stripped binaries, use
+`"cstring_xref": "exact string"`. C-string anchors use `LC_FUNCTION_STARTS`
+and support both direct `ADR` and `ADRP` plus `ADD` references.
+
+Instruction constraints currently support:
+
+- mnemonics `LDRB`, `LDR`, `STR`, `MOV`, `CMP`, `CSET`, `CBZ`, `CBNZ`, `TBZ`,
+  `TBNZ`, `B`, `BL`, and `RET`;
+- exact registers such as `W0` and `X10`, or same-width wildcards `W?` and
+  `X?`;
+- `destination`, `source`, `immediate`, `condition`, and
+  `memory.base`/`memory.offset`;
+- `"*"` for any immediate or memory displacement.
+
+Only `"match": "unique"` is supported. Zero or multiple matches stop the
+patch before any target is changed. The matched bytes become the internal
+`expected` value, so they are validated again immediately before patching.
+The replacement must have the same length as the matched instruction.
+
+For multi-target patchfind definitions, select the top-level target alias on
+each finder:
+
+```json
+{
+  "targets": {
+    "daemon-a": "/usr/libexec/exampled-a",
+    "daemon-b": "/usr/libexec/exampled-b"
+  },
+  "patchfind": [
+    {
+      "target": "daemon-a",
+      "function": "_first_function",
+      "instruction": { "mnemonic": "MOV", "destination": "W0", "immediate": "*" },
+      "replace": "20 00 80 52"
+    },
+    {
+      "target": "daemon-b",
+      "function": "_second_function",
+      "instruction": { "mnemonic": "LDRB", "destination": "W0", "memory": { "base": "X?", "offset": "*" } },
+      "replace": "20 00 80 52"
+    }
+  ]
+}
+```
+
+`operations` and `patchfind` may coexist inside the same selected version.
+Top-level patchfind entries are version-independent; `versions[].patchfind`
+uses the existing iOS/build selector rules.
 
 Do not leave example selectors or the example `default` variant in a real patch
 unless they have verified offsets and bytes.
@@ -127,8 +240,9 @@ wins. A variant cannot combine `ios` with `ios_min` or `ios_max`.
 
 ## Operations and safety
 
-Multiple operations may be included in one variant. Multiple enabled patches
-may also target the same binary. The patcher groups them by target and then:
+Multiple operations may be included in one variant, including operations for
+different aliases in a multi-target patch. Multiple enabled patches may also target
+the same binary. The patcher groups them by resolved target and then:
 
 1. reads the original binary into memory;
 2. validates every offset and every `expected` byte;
@@ -158,6 +272,7 @@ Useful options:
 --patch-dir PATH       Patch definition directory
 --config PATH          Enabled/disabled patch state file
 --sign-tool PATH       ldid-compatible signing tool
+--patchfinder-tool PATH custombin_patchfinder-compatible executable
 --backup-dir PATH      Store backups outside the System volume
 --metadata-output PATH Write changed target paths and inode numbers
 --dry-run              Validate and report without changing files

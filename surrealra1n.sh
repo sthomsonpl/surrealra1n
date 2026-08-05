@@ -2,7 +2,7 @@
 PROJECT_NAME="Surrealra1nForge"
 PROJECT_REPOSITORY="https://github.com/sthomsonpl/Surrealra1nForge"
 EXPERIMENTAL_UPDATE_REPOSITORY="$PROJECT_REPOSITORY.git"
-CURRENT_VERSION="v1.1b2"
+CURRENT_VERSION="v1.2b1"
 
 if [ "$EUID" -eq 0 ]; then
   echo "ERROR: Do not run this script with sudo or as root."
@@ -444,6 +444,15 @@ if [[ ! -x "./bin/iBootPatch" || \
         patchers/arm64e_iboot_patcher.c -o bin/iBootPatch
 fi
 
+if [[ ! -x "./bin/custombin_patchfinder" || \
+      "custom_binpatcher/patchfinder/custombin_patchfinder.c" -nt \
+      "./bin/custombin_patchfinder" ]]; then
+    echo "Building Custom Binpatcher patchfinder..."
+    gcc -std=c11 -O2 -Wall -Wextra \
+        custom_binpatcher/patchfinder/custombin_patchfinder.c \
+        -o bin/custombin_patchfinder
+fi
+
 # Check if all required binaries exist
 if [[ -f "./bin/img4" && \
       -f "./bin/img4tool" && \
@@ -458,6 +467,7 @@ if [[ -f "./bin/img4" && \
       -f "./bin/pzb" && \
       -f "./bin/zenity" && \
       -x "./bin/iBootPatch" && \
+      -x "./bin/custombin_patchfinder" && \
       -f "./bin/iBoot64Patcher" && \
       -f "./bin/asr64_patcher" && \
       -f "./bin/ipx_restored_patcher" && \

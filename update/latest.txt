@@ -1,13 +1,7 @@
-v1.1b2
+v1.2b1
 
 RELEASE NOTES:
 
-- A12/A13 iOS 16 tethered downgrades
-  (original implementation: pwnerblu and afastaudir8).
-- Linux support for iOS 16.0.x A12/A13 tethered restores
-  (thanks to @BatuBey5G).
-- Sync with surrealra1n v2.0 beta 26.
-- Add macOS System Mods support for iOS 16 custom IPSWs
-- System Mods: Fix support for iOS 16.1+ APFS restore ramdisks.
-- System Mods: Fix Dropbear SSH on APFS restore ramdisks (iOS16.1+).
-- System Mods: Remove the Skip Setup option.
+- Custom Binpatcher: added multi-target patch definitions, 
+allowing one patch to apply operations to multiple binaries while preserving single-target compatibility.
+-- Custom Binpatcher: added semantic patchfinder.

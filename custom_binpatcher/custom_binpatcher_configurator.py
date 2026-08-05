@@ -12,7 +12,11 @@ import tempfile
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATCH_DIR = os.path.join(SCRIPT_DIR, "patches")
 DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "patches.json")
-TEMPLATE_PATCH = "template_patch.json"
+TEMPLATE_PATCHES = {
+    "template_patch.json",
+    "template_multi_target_patch.json",
+    "template_patchfind.json",
+}
 
 
 def load_json(path, missing=None):
@@ -32,7 +36,7 @@ def scan_patches(patch_dir):
         raise ValueError(f"patch directory does not exist: {patch_dir}")
     patches = {}
     for path in sorted(glob.glob(os.path.join(patch_dir, "*.json"))):
-        if os.path.basename(path) == TEMPLATE_PATCH:
+        if os.path.basename(path) in TEMPLATE_PATCHES:
             continue
         patch = load_json(path)
         if not isinstance(patch, dict):
@@ -91,7 +95,7 @@ def show_menu(patches, config, dirty):
             print(f"    {patch['description']}")
     else:
         print("No custom patch definitions found.")
-        print(f"Copy {TEMPLATE_PATCH} to a new JSON file to create one.")
+        print("Copy template_patch.json to a new JSON file to create one.")
     print("\n[S] Save")
     print("[R] Rescan")
     print("[Q] Quit")
