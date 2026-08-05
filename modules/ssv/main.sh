@@ -291,7 +291,9 @@ ssv_current_ipsw_fingerprint() {
         "$SCRIPT_DIR/patchers/arm64e_iboot_patcher.c" \
         "$SCRIPT_DIR/modules/ssv/main.sh" \
         "$SCRIPT_DIR/payloads/dropbear_sshd/mtree_wrapper.c" \
-        "$SCRIPT_DIR/payloads/dropbear_sshd/apfs_sealvolume_wrapper.c" <<'PY'
+        "$SCRIPT_DIR/payloads/dropbear_sshd/apfs_sealvolume_wrapper.c" \
+        "$SCRIPT_DIR/payloads/dropbear_sshd/prepare_payload.py" \
+        "$SCRIPT_DIR/modules/ssv/apply_payload_metadata.py" <<'PY'
 import glob
 import hashlib
 import json
@@ -311,6 +313,8 @@ import sys
     ssv_pipeline_path,
     mtree_wrapper_path,
     apfs_sealvolume_wrapper_path,
+    payload_prepare_path,
+    payload_metadata_path,
 ) = sys.argv[1:]
 
 enabled_definitions = {}
@@ -331,10 +335,15 @@ if custom_active == "1":
 with open(arm64e_iboot_patcher_path, "rb") as source:
     arm64e_iboot_patcher_hash = hashlib.sha256(source.read()).hexdigest()
 
-seal_probe_hashes = {}
-for path in (mtree_wrapper_path, apfs_sealvolume_wrapper_path):
+ssv_source_hashes = {}
+for path in (
+    mtree_wrapper_path,
+    apfs_sealvolume_wrapper_path,
+    payload_prepare_path,
+    payload_metadata_path,
+):
     with open(path, "rb") as source:
-        seal_probe_hashes[os.path.basename(path)] = hashlib.sha256(
+        ssv_source_hashes[os.path.basename(path)] = hashlib.sha256(
             source.read()
         ).hexdigest()
 
@@ -350,7 +359,7 @@ state = {
     "custom_binpatches": enabled_definitions,
     "arm64e_iboot_patcher": arm64e_iboot_patcher_hash,
     "ssv_pipeline": ssv_pipeline_hash,
-    "seal_probe_sources": seal_probe_hashes,
+    "ssv_sources": ssv_source_hashes,
 }
 serialized = json.dumps(
     state, sort_keys=True, separators=(",", ":"), ensure_ascii=True
@@ -1131,7 +1140,7 @@ ssv_attach_restore_ramdisk() {
     SSV_RAMDISK_MOUNT=""
     SSV_RAMDISK_DEVICE=""
     if [[ $SSV_RAMDISK_FORMAT == apfs ]]; then
-        hdiutil attach \
+        sudo hdiutil attach \
             -imagekey diskimage-class=CRawDiskImage \
             -nobrowse -noverify -owners on -plist "$image" > "$attach_plist"
         attachment=$(python3 - "$attach_plist" <<'PY'
@@ -1160,10 +1169,12 @@ PY
         }
         SSV_RAMDISK_DEVICE=${attachment%%$'\n'*}
         SSV_RAMDISK_MOUNT=${attachment#*$'\n'}
+        sudo diskutil enableOwnership "$SSV_RAMDISK_MOUNT"
         if [[ $SSV_RAMDISK_TARGET_BYTES -gt 0 ]]; then
             echo "[*] Expanding temporary APFS container on ${SSV_RAMDISK_DEVICE#/dev/}..."
             sudo diskutil apfs resizeContainer \
                 "${SSV_RAMDISK_DEVICE#/dev/}" 0
+            SSV_RAMDISK_TARGET_BYTES=0
         fi
     else
         hdiutil attach -nobrowse -noverify -owners on \
@@ -1179,7 +1190,11 @@ PY
 
 ssv_detach_restore_ramdisk() {
     if [[ -n "$SSV_RAMDISK_DEVICE" ]]; then
-        hdiutil detach "$SSV_RAMDISK_DEVICE"
+        if [[ $SSV_RAMDISK_FORMAT == apfs ]]; then
+            sudo hdiutil detach "$SSV_RAMDISK_DEVICE"
+        else
+            hdiutil detach "$SSV_RAMDISK_DEVICE"
+        fi
     elif [[ -n "$SSV_RAMDISK_MOUNT" ]]; then
         hdiutil detach "$SSV_RAMDISK_MOUNT"
     fi
@@ -1258,9 +1273,44 @@ ssv_install_seal_probes() {
 
 }
 
+ssv_apply_dropbear_payload_metadata() {
+    local metadata=payloads/dropbear_sshd/payload-metadata.json
+    local rootfs_destination
+
+    [[ -f "$metadata" ]] || {
+        echo "[!] Dropbear payload metadata is missing."
+        return 1
+    }
+    if [[ -z "$SSV_RAMDISK_MOUNT" ]]; then
+        ssv_ramdisk_add \
+            payloads/dropbear_sshd/com.surrealra1n.install-dropbear.plist \
+            System/Library/LaunchDaemons/com.surrealra1n.install-dropbear.plist
+        ssv_ramdisk_chmod \
+            100644 System/Library/LaunchDaemons/com.surrealra1n.install-dropbear.plist
+        return 0
+    fi
+    rootfs_destination=$(ssv_ramdisk_mounted_path \
+        usr/local/share/surrealra1n_dropbear/rootfs)
+    sudo python3 modules/ssv/apply_payload_metadata.py apply \
+        "$metadata" "$rootfs_destination" "$SSV_RAMDISK_MOUNT" \
+        --source-root payloads/dropbear_sshd
+}
+
+ssv_verify_dropbear_payload_metadata() {
+    local metadata=payloads/dropbear_sshd/payload-metadata.json
+    local rootfs_destination
+
+    [[ $SSHD_DEV -eq 1 && -n "$SSV_RAMDISK_MOUNT" ]] || return 0
+    rootfs_destination=$(ssv_ramdisk_mounted_path \
+        usr/local/share/surrealra1n_dropbear/rootfs)
+    python3 modules/ssv/apply_payload_metadata.py verify \
+        "$metadata" "$rootfs_destination" "$SSV_RAMDISK_MOUNT"
+}
+
 ssv_install_restore_components() {
     ssv_install_dropbear
     ssv_install_seal_probes
+    ssv_verify_dropbear_payload_metadata
 }
 
 ssv_prepare_restore_ramdisk() {
@@ -1311,8 +1361,6 @@ ssv_install_dropbear() {
     local rootless_symbol
     local system_mount
     local payload_file
-    local executable_file
-    local executable_path
     local deployment_target
     local -a payload_codesign_args
 
@@ -1443,11 +1491,7 @@ PY
     ssv_ramdisk_addall \
         payloads/dropbear_sshd/rootfs \
         usr/local/share/surrealra1n_dropbear/rootfs
-    while IFS= read -r executable_file; do
-        executable_path=${executable_file#payloads/dropbear_sshd/rootfs/}
-        ssv_ramdisk_chmod \
-            100755 "usr/local/share/surrealra1n_dropbear/rootfs/$executable_path"
-    done < <(find payloads/dropbear_sshd/rootfs -type f -perm -111 -print)
+    ssv_apply_dropbear_payload_metadata
     ssv_ramdisk_add \
         work/launchd_cache_loader.patched \
         usr/local/share/surrealra1n_dropbear/launchd-cache-loader
@@ -1468,11 +1512,6 @@ PY
         usr/local/bin/surrealra1n_install_dropbear
     ssv_ramdisk_chmod \
         100755 usr/local/bin/surrealra1n_install_dropbear
-    ssv_ramdisk_add \
-        payloads/dropbear_sshd/com.surrealra1n.install-dropbear.plist \
-        System/Library/LaunchDaemons/com.surrealra1n.install-dropbear.plist
-    ssv_ramdisk_chmod \
-        100644 System/Library/LaunchDaemons/com.surrealra1n.install-dropbear.plist
 }
 
 ssv_patch_restore_trustcache() {

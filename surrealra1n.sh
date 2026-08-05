@@ -2363,6 +2363,12 @@ if [[ $dist == 3 || $dist == 4 ]]; then
         ssv_install_restore_components
     fi
     ssv_detach_restore_ramdisk
+    if [[ $SSV_RAMDISK_FORMAT == apfs ]]; then
+        echo "[*] Verifying APFS restore ramdisk ownership after remount..."
+        ssv_attach_restore_ramdisk work/ramdisk.dmg rdwork
+        ssv_verify_dropbear_payload_metadata
+        ssv_detach_restore_ramdisk
+    fi
     # restored end
     ./bin/img4 -i tmp1/Firmware/$ramdisk_dmg_name.trustcache -o work/trustcache.raw
     ./bin/trustcache append work/trustcache.raw work/restored_patch
