@@ -2,10 +2,8 @@
 
 SSV_CONFIG_PATH=${SSV_CONFIG_PATH:-boot/ssv_config.json}
 SSV_PATCHED=0
-SSV_CONFIG_SKIP_SETUP=0
 SSV_CONFIG_SSHD=0
 SSV_CONFIG_CUSTOM_BINPATCHES=0
-SKIP_SETUP_DEV=0
 SSHD_DEV=0
 CUSTOM_BINPATCHES_DEV=0
 CUSTOM_BINPATCHER_DIR=${CUSTOM_BINPATCHER_DIR:-"$SCRIPT_DIR/custom_binpatcher"}
@@ -19,11 +17,9 @@ ssv_reset_options() {
 
 ssv_apply_config() {
     if [[ $SSV_PATCHED -eq 1 ]]; then
-        SKIP_SETUP_DEV=$SSV_CONFIG_SKIP_SETUP
         SSHD_DEV=$SSV_CONFIG_SSHD
         CUSTOM_BINPATCHES_DEV=$SSV_CONFIG_CUSTOM_BINPATCHES
     else
-        SKIP_SETUP_DEV=0
         SSHD_DEV=0
         CUSTOM_BINPATCHES_DEV=0
     fi
@@ -34,18 +30,17 @@ ssv_write_config() {
     config_directory=$(dirname "$SSV_CONFIG_PATH")
     mkdir -p "$config_directory"
     python3 - "$SSV_CONFIG_PATH" "$SSV_PATCHED" \
-        "$SSV_CONFIG_SKIP_SETUP" "$SSV_CONFIG_SSHD" \
+        "$SSV_CONFIG_SSHD" \
         "$SSV_CONFIG_CUSTOM_BINPATCHES" <<'PY'
 import json
 import os
 import sys
 
-path, patched, skip_setup, sshd, custom_binpatches = sys.argv[1:]
+path, patched, sshd, custom_binpatches = sys.argv[1:]
 config = {
     "schema_version": 1,
     "ssv_patched": patched == "1",
     "patches": {
-        "skip_setup": skip_setup == "1",
         "dropbear_sshd": sshd == "1",
         "custom_binpatches": custom_binpatches == "1",
     },
@@ -62,6 +57,7 @@ PY
 
 ssv_load_config() {
     local loaded_config
+    local config_needs_migration=0
 
     if [[ ! -f "$SSV_CONFIG_PATH" ]]; then
         ssv_apply_config
@@ -84,17 +80,20 @@ patches = config.get("patches")
 if not isinstance(patched, bool) or not isinstance(patches, dict):
     raise ValueError("invalid System Patches configuration")
 
-skip_setup = patches.get("skip_setup")
 sshd = patches.get("dropbear_sshd")
 custom_binpatches = patches.get("custom_binpatches", False)
 if (
-    not isinstance(skip_setup, bool)
-    or not isinstance(sshd, bool)
+    not isinstance(sshd, bool)
     or not isinstance(custom_binpatches, bool)
 ):
     raise ValueError("invalid patch configuration")
 
-print(int(patched), int(skip_setup), int(sshd), int(custom_binpatches))
+print(
+    int(patched),
+    int(sshd),
+    int(custom_binpatches),
+    int("skip_setup" in patches),
+)
 PY
     ); then
         echo "[!] Invalid System Patches configuration in $SSV_CONFIG_PATH; all System Patches are disabled."
@@ -102,9 +101,12 @@ PY
         return
     fi
 
-    read -r SSV_PATCHED SSV_CONFIG_SKIP_SETUP SSV_CONFIG_SSHD \
-        SSV_CONFIG_CUSTOM_BINPATCHES <<< "$loaded_config"
+    read -r SSV_PATCHED SSV_CONFIG_SSHD \
+        SSV_CONFIG_CUSTOM_BINPATCHES config_needs_migration <<< "$loaded_config"
     ssv_apply_config
+    if [[ $config_needs_migration -eq 1 ]]; then
+        ssv_write_config
+    fi
 }
 
 ssv_deployment_target() {
@@ -147,15 +149,10 @@ ssv_configure_runtime_for_volume() {
     # Start from the persisted choices before applying per-target capabilities.
     ssv_apply_config
     if ! ssv_ios15_features_are_supported; then
-        if [[ $SKIP_SETUP_DEV -eq 1 ]]; then
-            echo "[!] Skip Setup requires a sealed System Volume on iOS 15+."
-            echo "[*] Skip Setup is disabled for this restore."
-        fi
         if [[ $SSHD_DEV -eq 1 ]]; then
             echo "[!] SSH/Dropbear requires a sealed System Volume on iOS 15+."
             echo "[*] SSH/Dropbear is disabled for this restore."
         fi
-        SKIP_SETUP_DEV=0
         SSHD_DEV=0
     fi
 }
@@ -217,30 +214,24 @@ ssv_config_menu() {
             echo "System Patches are OFF. These settings are saved but currently inactive."
             echo ""
         fi
-        if [[ $SSV_CONFIG_SKIP_SETUP -eq 1 ]]; then
-            echo "1. Skip Setup (iOS 15+; activation required) [ON]"
-        else
-            echo "1. Skip Setup (iOS 15+; activation required) [OFF]"
-        fi
         if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
-            echo "2. SSH patches (iOS 15+) [ON]"
+            echo "1. SSH patches (iOS 15+) [ON]"
         else
-            echo "2. SSH patches (iOS 15+) [OFF]"
+            echo "1. SSH patches (iOS 15+) [OFF]"
         fi
         if [[ $SSV_CONFIG_CUSTOM_BINPATCHES -eq 1 ]]; then
-            echo "3. Custom Binpatches [ON]"
+            echo "2. Custom Binpatches [ON]"
         else
-            echo "3. Custom Binpatches [OFF]"
+            echo "2. Custom Binpatches [OFF]"
         fi
-        echo "4. Custom Binpatches Configurator"
-        echo "5. Back"
-        read -p "Please input an option (1-5, or C): " ssv_config_option
+        echo "3. Custom Binpatches Configurator"
+        echo "4. Back"
+        read -p "Please input an option (1-4, or C): " ssv_config_option
         case "$ssv_config_option" in
-            1) ssv_toggle_skip_setup ;;
-            2) ssv_toggle_ssh ;;
-            3) ssv_toggle_custom_binpatches ;;
-            4|C|c) ssv_custom_binpatches_configurator ;;
-            5) return ;;
+            1) ssv_toggle_ssh ;;
+            2) ssv_toggle_custom_binpatches ;;
+            3|C|c) ssv_custom_binpatches_configurator ;;
+            4) return ;;
             *)
                 echo "Invalid option."
                 read -p "Press enter to continue"
@@ -259,7 +250,7 @@ ssv_set_custom_ipsw_name() {
 }
 
 ssv_system_patches_are_active() {
-    [[ $SKIP_SETUP_DEV -eq 1 || $SSHD_DEV -eq 1 ]] || \
+    [[ $SSHD_DEV -eq 1 ]] || \
         ssv_custom_binpatches_are_active
 }
 
@@ -294,7 +285,7 @@ ssv_current_ipsw_fingerprint() {
         custom_active=1
     fi
     python3 - "$IDENTIFIER" "$VERSION" "$BUILD" \
-        "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_active" \
+        "$SSHD_DEV" "$custom_active" \
         "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" \
         "$SYSTEM_VOLUME_MODE" \
         "$SCRIPT_DIR/patchers/arm64e_iboot_patcher.c" \
@@ -311,7 +302,6 @@ import sys
     identifier,
     ios,
     build,
-    skip_setup,
     sshd,
     custom_active,
     config_path,
@@ -356,7 +346,6 @@ state = {
     "ios": ios,
     "build": build,
     "system_volume_mode": volume_mode,
-    "skip_setup": skip_setup == "1",
     "dropbear_sshd": sshd == "1",
     "custom_binpatches": enabled_definitions,
     "arm64e_iboot_patcher": arm64e_iboot_patcher_hash,
@@ -399,7 +388,7 @@ write_ssv_patch_profile() {
     fi
     mkdir -p "$profile_directory"
     python3 - "$profile_path" "$ECID" "$IDENTIFIER" "$VERSION" \
-        "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_binpatches" \
+        "$SSHD_DEV" "$custom_binpatches" \
         "$CUSTOM_BINPATCHER_CONFIG" "$SYSTEM_VOLUME_MODE" <<'PY'
 import json
 import os
@@ -410,13 +399,11 @@ import sys
     ecid,
     identifier,
     version,
-    skip_setup,
     sshd,
     custom_binpatches,
     custom_config_path,
     volume_mode,
 ) = sys.argv[1:]
-skip_setup_enabled = skip_setup == "1"
 loader_enabled = sshd == "1"
 custom_enabled = custom_binpatches == "1"
 custom_patch_ids = []
@@ -427,8 +414,7 @@ if custom_enabled:
         patch_id for patch_id, enabled in custom_config.items() if enabled is True
     )
 patch_profile = {
-    "enabled": skip_setup_enabled or loader_enabled or custom_enabled,
-    "skip_setup": skip_setup_enabled,
+    "enabled": loader_enabled or custom_enabled,
     "dropbear_sshd": loader_enabled,
     "custom_binpatches": {
         "enabled": custom_enabled,
@@ -690,21 +676,6 @@ PY
     echo "[*] This restore attempt can now be repeated."
 )
 
-ssv_toggle_skip_setup(){
-    if [[ $SSV_CONFIG_SKIP_SETUP -eq 1 ]]; then
-        SSV_CONFIG_SKIP_SETUP=0
-        echo "[*] Experimental Skip Setup: OFF"
-    else
-        SSV_CONFIG_SKIP_SETUP=1
-        echo "[*] Experimental Skip Setup: ON"
-        echo "[!] Device and iOS compatibility is not guaranteed."
-        echo "[!] This does not bypass activation."
-    fi
-    ssv_apply_config
-    ssv_write_config
-    read -p "Press enter to continue"
-}
-
 ssv_toggle_ssh(){
     if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
         SSV_CONFIG_SSHD=0
@@ -732,7 +703,7 @@ ssv_toggle_custom_binpatches() {
         echo "[*] Custom Binpatches: ON"
         echo "[!] Sealed System Volumes on iOS 15+ require two restore attempts."
         echo "[*] Unsealed System Volumes are patched in a single restore."
-        echo "[!] Use option 4 to choose the individual patches."
+        echo "[!] Use option 3 to choose the individual patches."
     fi
     ssv_apply_config
     ssv_write_config
@@ -1288,7 +1259,6 @@ ssv_install_seal_probes() {
 }
 
 ssv_install_restore_components() {
-    ssv_install_skip_setup
     ssv_install_dropbear
     ssv_install_seal_probes
 }
@@ -1331,35 +1301,6 @@ ssv_prepare_restore_ramdisk() {
         ./bin/hfsplus "$SSV_RAMDISK_IMAGE" grow "$target_bytes"
         SSV_RAMDISK_TARGET_BYTES=0
     fi
-}
-
-ssv_install_skip_setup() {
-    [[ $SKIP_SETUP_DEV -eq 1 ]] || return 0
-
-    local deployment_target
-    deployment_target=$(ssv_deployment_target)
-
-    echo "[*] Building the native restore-time SetupDone helper..."
-    xcrun --sdk iphoneos clang \
-        -arch arm64 \
-        -miphoneos-version-min="$deployment_target" \
-        -Os \
-        -Wl,-dead_strip \
-        payloads/skip_setup_dev/skip_setup_dev.c \
-        -o work/surrealra1n_skip_setup_dev
-    ./bin/ldid -S work/surrealra1n_skip_setup_dev
-
-    echo "[*] Installing the experimental Skip Setup launch daemon..."
-    ssv_ramdisk_add \
-        work/surrealra1n_skip_setup_dev \
-        usr/local/bin/surrealra1n_skip_setup_dev
-    ssv_ramdisk_chmod \
-        100755 usr/local/bin/surrealra1n_skip_setup_dev
-    ssv_ramdisk_add \
-        payloads/skip_setup_dev/com.surrealra1n.skip-setup-dev.plist \
-        System/Library/LaunchDaemons/com.surrealra1n.skip-setup-dev.plist
-    ssv_ramdisk_chmod \
-        100644 System/Library/LaunchDaemons/com.surrealra1n.skip-setup-dev.plist
 }
 
 ssv_install_dropbear() {
@@ -1535,8 +1476,7 @@ PY
 }
 
 ssv_patch_restore_trustcache() {
-    if [[ $SKIP_SETUP_DEV -ne 1 && $SSHD_DEV -ne 1 ]] && \
-            ! ssv_requires_seal_sync; then
+    if [[ $SSHD_DEV -ne 1 ]] && ! ssv_requires_seal_sync; then
         return 0
     fi
 
@@ -1546,10 +1486,6 @@ ssv_patch_restore_trustcache() {
             -o work/trustcache.raw
     fi
 
-    if [[ $SKIP_SETUP_DEV -eq 1 ]]; then
-        ./bin/trustcache append \
-            work/trustcache.raw work/surrealra1n_skip_setup_dev
-    fi
     if [[ $SSHD_DEV -eq 1 ]]; then
         ./bin/trustcache append \
             work/trustcache.raw work/surrealra1n_install_dropbear
