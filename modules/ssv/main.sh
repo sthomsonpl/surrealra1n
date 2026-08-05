@@ -2,10 +2,8 @@
 
 SSV_CONFIG_PATH=${SSV_CONFIG_PATH:-boot/ssv_config.json}
 SSV_PATCHED=0
-SSV_CONFIG_SKIP_SETUP=0
 SSV_CONFIG_SSHD=0
 SSV_CONFIG_CUSTOM_BINPATCHES=0
-SKIP_SETUP_DEV=0
 SSHD_DEV=0
 CUSTOM_BINPATCHES_DEV=0
 CUSTOM_BINPATCHER_DIR=${CUSTOM_BINPATCHER_DIR:-"$SCRIPT_DIR/custom_binpatcher"}
@@ -19,11 +17,9 @@ ssv_reset_options() {
 
 ssv_apply_config() {
     if [[ $SSV_PATCHED -eq 1 ]]; then
-        SKIP_SETUP_DEV=$SSV_CONFIG_SKIP_SETUP
         SSHD_DEV=$SSV_CONFIG_SSHD
         CUSTOM_BINPATCHES_DEV=$SSV_CONFIG_CUSTOM_BINPATCHES
     else
-        SKIP_SETUP_DEV=0
         SSHD_DEV=0
         CUSTOM_BINPATCHES_DEV=0
     fi
@@ -34,18 +30,17 @@ ssv_write_config() {
     config_directory=$(dirname "$SSV_CONFIG_PATH")
     mkdir -p "$config_directory"
     python3 - "$SSV_CONFIG_PATH" "$SSV_PATCHED" \
-        "$SSV_CONFIG_SKIP_SETUP" "$SSV_CONFIG_SSHD" \
+        "$SSV_CONFIG_SSHD" \
         "$SSV_CONFIG_CUSTOM_BINPATCHES" <<'PY'
 import json
 import os
 import sys
 
-path, patched, skip_setup, sshd, custom_binpatches = sys.argv[1:]
+path, patched, sshd, custom_binpatches = sys.argv[1:]
 config = {
     "schema_version": 1,
     "ssv_patched": patched == "1",
     "patches": {
-        "skip_setup": skip_setup == "1",
         "dropbear_sshd": sshd == "1",
         "custom_binpatches": custom_binpatches == "1",
     },
@@ -62,6 +57,7 @@ PY
 
 ssv_load_config() {
     local loaded_config
+    local config_needs_migration=0
 
     if [[ ! -f "$SSV_CONFIG_PATH" ]]; then
         ssv_apply_config
@@ -84,17 +80,20 @@ patches = config.get("patches")
 if not isinstance(patched, bool) or not isinstance(patches, dict):
     raise ValueError("invalid System Patches configuration")
 
-skip_setup = patches.get("skip_setup")
 sshd = patches.get("dropbear_sshd")
 custom_binpatches = patches.get("custom_binpatches", False)
 if (
-    not isinstance(skip_setup, bool)
-    or not isinstance(sshd, bool)
+    not isinstance(sshd, bool)
     or not isinstance(custom_binpatches, bool)
 ):
     raise ValueError("invalid patch configuration")
 
-print(int(patched), int(skip_setup), int(sshd), int(custom_binpatches))
+print(
+    int(patched),
+    int(sshd),
+    int(custom_binpatches),
+    int("skip_setup" in patches),
+)
 PY
     ); then
         echo "[!] Invalid System Patches configuration in $SSV_CONFIG_PATH; all System Patches are disabled."
@@ -102,9 +101,12 @@ PY
         return
     fi
 
-    read -r SSV_PATCHED SSV_CONFIG_SKIP_SETUP SSV_CONFIG_SSHD \
-        SSV_CONFIG_CUSTOM_BINPATCHES <<< "$loaded_config"
+    read -r SSV_PATCHED SSV_CONFIG_SSHD \
+        SSV_CONFIG_CUSTOM_BINPATCHES config_needs_migration <<< "$loaded_config"
     ssv_apply_config
+    if [[ $config_needs_migration -eq 1 ]]; then
+        ssv_write_config
+    fi
 }
 
 ssv_deployment_target() {
@@ -147,15 +149,10 @@ ssv_configure_runtime_for_volume() {
     # Start from the persisted choices before applying per-target capabilities.
     ssv_apply_config
     if ! ssv_ios15_features_are_supported; then
-        if [[ $SKIP_SETUP_DEV -eq 1 ]]; then
-            echo "[!] Skip Setup requires a sealed System Volume on iOS 15+."
-            echo "[*] Skip Setup is disabled for this restore."
-        fi
         if [[ $SSHD_DEV -eq 1 ]]; then
-            echo "[!] SSH/Dropbear requires a sealed System Volume on iOS 15+."
-            echo "[*] SSH/Dropbear is disabled for this restore."
+            echo "[!] SSH Dropbear requires a sealed System Volume on iOS 15+."
+            echo "[*] SSH Dropbear is disabled for this restore."
         fi
-        SKIP_SETUP_DEV=0
         SSHD_DEV=0
     fi
 }
@@ -217,30 +214,24 @@ ssv_config_menu() {
             echo "System Patches are OFF. These settings are saved but currently inactive."
             echo ""
         fi
-        if [[ $SSV_CONFIG_SKIP_SETUP -eq 1 ]]; then
-            echo "1. Skip Setup (iOS 15+; activation required) [ON]"
-        else
-            echo "1. Skip Setup (iOS 15+; activation required) [OFF]"
-        fi
         if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
-            echo "2. SSH patches (iOS 15+) [ON]"
+            echo "1. SSH Dropbear (iOS 15+) [ON]"
         else
-            echo "2. SSH patches (iOS 15+) [OFF]"
+            echo "1. SSH Dropbear (iOS 15+) [OFF]"
         fi
         if [[ $SSV_CONFIG_CUSTOM_BINPATCHES -eq 1 ]]; then
-            echo "3. Custom Binpatches [ON]"
+            echo "2. Custom Binpatches [ON]"
         else
-            echo "3. Custom Binpatches [OFF]"
+            echo "2. Custom Binpatches [OFF]"
         fi
-        echo "4. Custom Binpatches Configurator"
-        echo "5. Back"
-        read -p "Please input an option (1-5, or C): " ssv_config_option
+        echo "3. Custom Binpatches Configurator"
+        echo "4. Back"
+        read -p "Please input an option (1-4, or C): " ssv_config_option
         case "$ssv_config_option" in
-            1) ssv_toggle_skip_setup ;;
-            2) ssv_toggle_ssh ;;
-            3) ssv_toggle_custom_binpatches ;;
-            4|C|c) ssv_custom_binpatches_configurator ;;
-            5) return ;;
+            1) ssv_toggle_ssh ;;
+            2) ssv_toggle_custom_binpatches ;;
+            3|C|c) ssv_custom_binpatches_configurator ;;
+            4) return ;;
             *)
                 echo "Invalid option."
                 read -p "Press enter to continue"
@@ -250,8 +241,42 @@ ssv_config_menu() {
 }
 
 ssv_set_custom_ipsw_name() {
-    CUSTOM_IPSW_NAME="customssvpatched_${VERSION}_${IDENTIFIER}.ipsw"
+    if [[ $VERSION == 16.* ]] && ! ssv_system_patches_are_active; then
+        CUSTOM_IPSW_NAME="custom.ipsw"
+    else
+        CUSTOM_IPSW_NAME="customssvpatched_${VERSION}_${IDENTIFIER}.ipsw"
+    fi
     SSV_IPSW_STATE_PATH="$restoredir/${CUSTOM_IPSW_NAME%.ipsw}.config.sha256"
+}
+
+ssv_system_patches_are_active() {
+    [[ $SSHD_DEV -eq 1 ]] || \
+        ssv_custom_binpatches_are_active
+}
+
+ssv_uses_idevicerestore() {
+    [[ $VERSION == 16.* ]]
+}
+
+ssv_restore_log_path() {
+    if ssv_uses_idevicerestore; then
+        printf '%s\n' "$restoredir/idevicerestore-last.log"
+    else
+        printf '%s\n' "$restoredir/futurerestore-last.log"
+    fi
+}
+
+ssv_build_custom_ipsw() {
+    if [[ $VERSION == 16.* ]]; then
+        if ssv_system_patches_are_active && \
+                [[ $dist != 3 && $dist != 4 ]]; then
+            echo "[!] iOS 16 System Mods currently require macOS."
+            return 1
+        fi
+        make_custom_ipsw_a12_ios16
+    else
+        make_custom_ipsw_a12_ios14
+    fi
 }
 
 ssv_current_ipsw_fingerprint() {
@@ -260,10 +285,15 @@ ssv_current_ipsw_fingerprint() {
         custom_active=1
     fi
     python3 - "$IDENTIFIER" "$VERSION" "$BUILD" \
-        "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_active" \
+        "$SSHD_DEV" "$custom_active" \
         "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" \
         "$SYSTEM_VOLUME_MODE" \
-        "$SCRIPT_DIR/patchers/arm64e_iboot_patcher.c" <<'PY'
+        "$SCRIPT_DIR/patchers/arm64e_iboot_patcher.c" \
+        "$SCRIPT_DIR/modules/ssv/main.sh" \
+        "$SCRIPT_DIR/payloads/dropbear_sshd/mtree_wrapper.c" \
+        "$SCRIPT_DIR/payloads/dropbear_sshd/apfs_sealvolume_wrapper.c" \
+        "$SCRIPT_DIR/payloads/dropbear_sshd/prepare_payload.py" \
+        "$SCRIPT_DIR/modules/ssv/apply_payload_metadata.py" <<'PY'
 import glob
 import hashlib
 import json
@@ -274,13 +304,17 @@ import sys
     identifier,
     ios,
     build,
-    skip_setup,
     sshd,
     custom_active,
     config_path,
     patch_dir,
     volume_mode,
     arm64e_iboot_patcher_path,
+    ssv_pipeline_path,
+    mtree_wrapper_path,
+    apfs_sealvolume_wrapper_path,
+    payload_prepare_path,
+    payload_metadata_path,
 ) = sys.argv[1:]
 
 enabled_definitions = {}
@@ -301,15 +335,31 @@ if custom_active == "1":
 with open(arm64e_iboot_patcher_path, "rb") as source:
     arm64e_iboot_patcher_hash = hashlib.sha256(source.read()).hexdigest()
 
+ssv_source_hashes = {}
+for path in (
+    mtree_wrapper_path,
+    apfs_sealvolume_wrapper_path,
+    payload_prepare_path,
+    payload_metadata_path,
+):
+    with open(path, "rb") as source:
+        ssv_source_hashes[os.path.basename(path)] = hashlib.sha256(
+            source.read()
+        ).hexdigest()
+
+with open(ssv_pipeline_path, "rb") as source:
+    ssv_pipeline_hash = hashlib.sha256(source.read()).hexdigest()
+
 state = {
     "identifier": identifier,
     "ios": ios,
     "build": build,
     "system_volume_mode": volume_mode,
-    "skip_setup": skip_setup == "1",
     "dropbear_sshd": sshd == "1",
     "custom_binpatches": enabled_definitions,
     "arm64e_iboot_patcher": arm64e_iboot_patcher_hash,
+    "ssv_pipeline": ssv_pipeline_hash,
+    "ssv_sources": ssv_source_hashes,
 }
 serialized = json.dumps(
     state, sort_keys=True, separators=(",", ":"), ensure_ascii=True
@@ -347,7 +397,7 @@ write_ssv_patch_profile() {
     fi
     mkdir -p "$profile_directory"
     python3 - "$profile_path" "$ECID" "$IDENTIFIER" "$VERSION" \
-        "$SKIP_SETUP_DEV" "$SSHD_DEV" "$custom_binpatches" \
+        "$SSHD_DEV" "$custom_binpatches" \
         "$CUSTOM_BINPATCHER_CONFIG" "$SYSTEM_VOLUME_MODE" <<'PY'
 import json
 import os
@@ -358,13 +408,11 @@ import sys
     ecid,
     identifier,
     version,
-    skip_setup,
     sshd,
     custom_binpatches,
     custom_config_path,
     volume_mode,
 ) = sys.argv[1:]
-skip_setup_enabled = skip_setup == "1"
 loader_enabled = sshd == "1"
 custom_enabled = custom_binpatches == "1"
 custom_patch_ids = []
@@ -375,8 +423,7 @@ if custom_enabled:
         patch_id for patch_id, enabled in custom_config.items() if enabled is True
     )
 patch_profile = {
-    "enabled": skip_setup_enabled or loader_enabled or custom_enabled,
-    "skip_setup": skip_setup_enabled,
+    "enabled": loader_enabled or custom_enabled,
     "dropbear_sshd": loader_enabled,
     "custom_binpatches": {
         "enabled": custom_enabled,
@@ -638,28 +685,13 @@ PY
     echo "[*] This restore attempt can now be repeated."
 )
 
-ssv_toggle_skip_setup(){
-    if [[ $SSV_CONFIG_SKIP_SETUP -eq 1 ]]; then
-        SSV_CONFIG_SKIP_SETUP=0
-        echo "[*] Experimental Skip Setup: OFF"
-    else
-        SSV_CONFIG_SKIP_SETUP=1
-        echo "[*] Experimental Skip Setup: ON"
-        echo "[!] Device and iOS compatibility is not guaranteed."
-        echo "[!] This does not bypass activation."
-    fi
-    ssv_apply_config
-    ssv_write_config
-    read -p "Press enter to continue"
-}
-
 ssv_toggle_ssh(){
     if [[ $SSV_CONFIG_SSHD -eq 1 ]]; then
         SSV_CONFIG_SSHD=0
-        echo "[*] Experimental System SSH patches: OFF"
+        echo "[*] SSH Dropbear: OFF"
     else
         SSV_CONFIG_SSHD=1
-        echo "[*] Experimental System SSH patches: ON"
+        echo "[*] SSH Dropbear: ON"
         echo "[!] Device and iOS compatibility is not guaranteed."
         echo "[!] Sealed System Volumes on iOS 15+ require two restore attempts."
         echo "[!] The first pass captures the root hash; the second completes the restore."
@@ -680,7 +712,7 @@ ssv_toggle_custom_binpatches() {
         echo "[*] Custom Binpatches: ON"
         echo "[!] Sealed System Volumes on iOS 15+ require two restore attempts."
         echo "[*] Unsealed System Volumes are patched in a single restore."
-        echo "[!] Use option 4 to choose the individual patches."
+        echo "[!] Use option 3 to choose the individual patches."
     fi
     ssv_apply_config
     ssv_write_config
@@ -763,37 +795,42 @@ PY
 }
 
 ssv_prepare_restore_artifacts() {
+    local restore_log
+
     if [[ $SYSTEM_VOLUME_MODE == unknown ]]; then
         echo "[!] System volume mode was not detected before preparing artifacts."
         return 1
     fi
     ssv_validate_custom_binpatches
     ssv_set_custom_ipsw_name
+    restore_log=$(ssv_restore_log_path)
 
     if [[ ! -f "$restoredir/$CUSTOM_IPSW_NAME" ]]; then
         echo "Restore files do not exist, making new ones"
-        make_custom_ipsw_a12_ios14
+        ssv_build_custom_ipsw
     elif ! ssv_ipsw_matches_current_config; then
         echo "[*] The saved IPSW does not match the current System Patches configuration."
         echo "[*] Rebuilding $CUSTOM_IPSW_NAME automatically..."
         rm -f "$restoredir/$CUSTOM_IPSW_NAME" "$SSV_IPSW_STATE_PATH"
-        make_custom_ipsw_a12_ios14
+        ssv_build_custom_ipsw
+    elif ssv_requires_seal_sync && \
+            ssv_restore_log_has_seal_data "$restore_log" "$SSHD_DEV"; then
+        echo "[*] Reusing $CUSTOM_IPSW_NAME for sealed System restore pass 2/2."
     else
         echo "Restore files already exist ($CUSTOM_IPSW_NAME)"
         read -p "Would you like to make new ones? (y/n): " restorefiles_remake
         if [[ $restorefiles_remake == Y || $restorefiles_remake == y ]]; then
             rm -f "$restoredir/$CUSTOM_IPSW_NAME" "$SSV_IPSW_STATE_PATH"
-            make_custom_ipsw_a12_ios14
+            ssv_build_custom_ipsw
         fi
     fi
 
     ssv_requires_seal_sync || return 0
-    if ssv_restore_log_has_seal_data \
-            "$restoredir/futurerestore-last.log" "$SSHD_DEV"; then
+    if ssv_restore_log_has_seal_data "$restore_log" "$SSHD_DEV"; then
         echo "[*] Sealed System restore pass 2/2: using seal data from the restore log."
         ssv_patch_root_hash_from_restore_log \
             "$restoredir/$CUSTOM_IPSW_NAME" \
-            "$restoredir/futurerestore-last.log" "$SSHD_DEV"
+            "$restore_log" "$SSHD_DEV"
     else
         echo "[*] Sealed System restore pass 1/2: capturing the device root hash."
         echo "[*] Run the same restore again after this expected failure."
@@ -815,11 +852,14 @@ ssv_handle_restore_failure() {
 }
 
 ssv_finish_ipsw_build() {
+    local restore_log
+    local previous_log
+
     ssv_write_ipsw_fingerprint
-    if ssv_requires_seal_sync && \
-            [[ -f "$restoredir/futurerestore-last.log" ]]; then
-        mv -f "$restoredir/futurerestore-last.log" \
-            "$restoredir/futurerestore-previous.log"
+    restore_log=$(ssv_restore_log_path)
+    previous_log="${restore_log%-last.log}-previous.log"
+    if ssv_requires_seal_sync && [[ -f "$restore_log" ]]; then
+        mv -f "$restore_log" "$previous_log"
     fi
 }
 
@@ -998,21 +1038,199 @@ ssv_patch_custom_canonical_mtree() {
     echo "[*] Custom Binpatcher canonical mtree inodes synchronized."
 }
 
+SSV_RAMDISK_IMAGE=${SSV_RAMDISK_IMAGE:-work/ramdisk.raw}
+SSV_RAMDISK_MOUNT=${SSV_RAMDISK_MOUNT:-}
+SSV_RAMDISK_FORMAT=${SSV_RAMDISK_FORMAT:-unknown}
+SSV_RAMDISK_TARGET_BYTES=${SSV_RAMDISK_TARGET_BYTES:-0}
+SSV_RAMDISK_DEVICE=${SSV_RAMDISK_DEVICE:-}
+
+ssv_detect_ramdisk_format() {
+    python3 - "$1" <<'PY'
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    header = source.read(1026)
+if header[32:36] == b"NXSB":
+    print("apfs")
+elif header[1024:1026] in (b"H+", b"HX"):
+    print("hfs")
+else:
+    print("unknown")
+PY
+}
+
+ssv_ramdisk_mounted_path() {
+    local relative=${1#/}
+    [[ -n "$SSV_RAMDISK_MOUNT" && "$relative" != *'..'* ]] || return 1
+    printf '%s/%s\n' "$SSV_RAMDISK_MOUNT" "$relative"
+}
+
+ssv_ramdisk_mkdir() {
+    local relative=${1#/}
+    if [[ -n "$SSV_RAMDISK_MOUNT" ]]; then
+        sudo mkdir -p "$(ssv_ramdisk_mounted_path "$relative")"
+    else
+        ./bin/hfsplus "$SSV_RAMDISK_IMAGE" mkdir "$relative" 2>/dev/null || true
+    fi
+}
+
+ssv_ramdisk_extract() {
+    local relative=${1#/}
+    local destination="$2"
+    if [[ -n "$SSV_RAMDISK_MOUNT" ]]; then
+        cp "$(ssv_ramdisk_mounted_path "$relative")" "$destination"
+    else
+        ./bin/hfsplus "$SSV_RAMDISK_IMAGE" extract "$relative" "$destination"
+    fi
+}
+
+ssv_ramdisk_remove() {
+    local relative=${1#/}
+    if [[ -n "$SSV_RAMDISK_MOUNT" ]]; then
+        sudo rm -f "$(ssv_ramdisk_mounted_path "$relative")"
+    else
+        ./bin/hfsplus "$SSV_RAMDISK_IMAGE" rm "$relative"
+    fi
+}
+
+ssv_ramdisk_add() {
+    local source="$1"
+    local relative=${2#/}
+    local destination
+    if [[ -n "$SSV_RAMDISK_MOUNT" ]]; then
+        destination=$(ssv_ramdisk_mounted_path "$relative")
+        sudo mkdir -p "$(dirname "$destination")"
+        sudo cp -f "$source" "$destination"
+        sudo chown 0:0 "$destination"
+    else
+        ./bin/hfsplus "$SSV_RAMDISK_IMAGE" add "$source" "$relative"
+    fi
+}
+
+ssv_ramdisk_addall() {
+    local source="$1"
+    local relative=${2#/}
+    local destination
+    if [[ -n "$SSV_RAMDISK_MOUNT" ]]; then
+        destination=$(ssv_ramdisk_mounted_path "$relative")
+        sudo mkdir -p "$destination"
+        sudo ditto --noqtn "$source" "$destination"
+        sudo chown -R 0:0 "$destination"
+    else
+        ./bin/hfsplus "$SSV_RAMDISK_IMAGE" addall "$source" "$relative"
+    fi
+}
+
+ssv_ramdisk_chmod() {
+    local hfs_mode="$1"
+    local relative=${2#/}
+    if [[ -n "$SSV_RAMDISK_MOUNT" ]]; then
+        sudo chmod "${hfs_mode#100}" "$(ssv_ramdisk_mounted_path "$relative")"
+    else
+        ./bin/hfsplus "$SSV_RAMDISK_IMAGE" chmod "$hfs_mode" "$relative"
+    fi
+}
+
+ssv_attach_restore_ramdisk() {
+    local image="$1"
+    local preferred_mount="$2"
+    local attach_plist=work/ssv-ramdisk-attach.plist
+    local attachment
+
+    SSV_RAMDISK_MOUNT=""
+    SSV_RAMDISK_DEVICE=""
+    if [[ $SSV_RAMDISK_FORMAT == apfs ]]; then
+        sudo hdiutil attach \
+            -imagekey diskimage-class=CRawDiskImage \
+            -nobrowse -noverify -owners on -plist "$image" > "$attach_plist"
+        attachment=$(python3 - "$attach_plist" <<'PY'
+import plistlib
+import re
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    description = plistlib.load(source)
+physical_store = ""
+mount_point = ""
+for entity in description.get("system-entities", []):
+    device = entity.get("dev-entry", "")
+    if re.fullmatch(r"/dev/disk\d+", device) and not entity.get("content-hint"):
+        physical_store = device
+    if entity.get("volume-kind") == "apfs" and entity.get("mount-point"):
+        mount_point = entity["mount-point"]
+if not physical_store or not mount_point:
+    raise SystemExit(1)
+print(physical_store)
+print(mount_point)
+PY
+        ) || {
+            echo "[!] Could not resolve the temporary APFS ramdisk attachment."
+            return 1
+        }
+        SSV_RAMDISK_DEVICE=${attachment%%$'\n'*}
+        SSV_RAMDISK_MOUNT=${attachment#*$'\n'}
+        sudo diskutil enableOwnership "$SSV_RAMDISK_MOUNT"
+        if [[ $SSV_RAMDISK_TARGET_BYTES -gt 0 ]]; then
+            echo "[*] Expanding temporary APFS container on ${SSV_RAMDISK_DEVICE#/dev/}..."
+            sudo diskutil apfs resizeContainer \
+                "${SSV_RAMDISK_DEVICE#/dev/}" 0
+            SSV_RAMDISK_TARGET_BYTES=0
+        fi
+    else
+        hdiutil attach -nobrowse -noverify -owners on \
+            "$image" -mountpoint "$preferred_mount"
+        SSV_RAMDISK_MOUNT="$preferred_mount"
+    fi
+    [[ -d "$SSV_RAMDISK_MOUNT/usr" ]] || {
+        echo "[!] Restore ramdisk mount is missing its usr directory."
+        return 1
+    }
+    echo "[*] Mounted $SSV_RAMDISK_FORMAT restore ramdisk at $SSV_RAMDISK_MOUNT"
+}
+
+ssv_detach_restore_ramdisk() {
+    if [[ -n "$SSV_RAMDISK_DEVICE" ]]; then
+        if [[ $SSV_RAMDISK_FORMAT == apfs ]]; then
+            sudo hdiutil detach "$SSV_RAMDISK_DEVICE"
+        else
+            hdiutil detach "$SSV_RAMDISK_DEVICE"
+        fi
+    elif [[ -n "$SSV_RAMDISK_MOUNT" ]]; then
+        hdiutil detach "$SSV_RAMDISK_MOUNT"
+    fi
+    SSV_RAMDISK_MOUNT=""
+    SSV_RAMDISK_DEVICE=""
+}
+
 ssv_install_seal_probes() {
     ssv_requires_seal_sync || return 0
 
     local deployment_target
+    local ios_major
     deployment_target=$(ssv_deployment_target)
+    ios_major=$(ssv_ios_major)
 
     if [[ $SSHD_DEV -eq 1 ]]; then
-        echo "[*] Building the native mtree seal probe..."
-        xcrun --sdk iphoneos clang \
-            -arch arm64 \
-            -miphoneos-version-min="$deployment_target" \
-            -Os \
-            -Wl,-dead_strip \
-            payloads/dropbear_sshd/mtree_wrapper.c \
-            -o work/surrealra1n_mtree_wrapper
+        if [[ $ios_major -ge 16 ]]; then
+            echo "[*] Building the native mtree seal probe (iOS 16 mode)..."
+            xcrun --sdk iphoneos clang \
+                -arch arm64 \
+                -miphoneos-version-min="$deployment_target" \
+                -DSURREALRAIN_EXPECT_MTREE_MISMATCH \
+                -Os \
+                -Wl,-dead_strip \
+                payloads/dropbear_sshd/mtree_wrapper.c \
+                -o work/surrealra1n_mtree_wrapper
+        else
+            echo "[*] Building the native mtree seal probe..."
+            xcrun --sdk iphoneos clang \
+                -arch arm64 \
+                -miphoneos-version-min="$deployment_target" \
+                -Os \
+                -Wl,-dead_strip \
+                payloads/dropbear_sshd/mtree_wrapper.c \
+                -o work/surrealra1n_mtree_wrapper
+        fi
         ./bin/ldid -S work/surrealra1n_mtree_wrapper
     fi
 
@@ -1028,38 +1246,71 @@ ssv_install_seal_probes() {
 
     if [[ $SSHD_DEV -eq 1 ]]; then
         echo "[*] Installing the native mtree seal probe..."
-        ./bin/hfsplus work/ramdisk.raw extract usr/sbin/mtree work/mtree.real
-        ./bin/hfsplus work/ramdisk.raw rm usr/sbin/mtree
-        ./bin/hfsplus work/ramdisk.raw add work/mtree.real usr/sbin/mtree.real
-        ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/sbin/mtree.real
-        ./bin/hfsplus work/ramdisk.raw add \
-            work/surrealra1n_mtree_wrapper usr/sbin/mtree
-        ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/sbin/mtree
+        ssv_ramdisk_extract usr/sbin/mtree work/mtree.real
+        ssv_ramdisk_remove usr/sbin/mtree
+        ssv_ramdisk_add work/mtree.real usr/sbin/mtree.real
+        ssv_ramdisk_chmod 100755 usr/sbin/mtree.real
+        ssv_ramdisk_add work/surrealra1n_mtree_wrapper usr/sbin/mtree
+        ssv_ramdisk_chmod 100755 usr/sbin/mtree
     fi
 
     echo "[*] Installing the native APFS digest probe..."
-    ./bin/hfsplus work/ramdisk.raw extract \
+    ssv_ramdisk_extract \
         System/Library/Filesystems/apfs.fs/apfs_sealvolume \
         work/apfs_sealvolume.real
-    ./bin/hfsplus work/ramdisk.raw rm \
+    ssv_ramdisk_remove \
         System/Library/Filesystems/apfs.fs/apfs_sealvolume
-    ./bin/hfsplus work/ramdisk.raw add \
+    ssv_ramdisk_add \
         work/apfs_sealvolume.real \
         System/Library/Filesystems/apfs.fs/apfs_sealvolume.real
-    ./bin/hfsplus work/ramdisk.raw chmod \
+    ssv_ramdisk_chmod \
         100755 System/Library/Filesystems/apfs.fs/apfs_sealvolume.real
-    ./bin/hfsplus work/ramdisk.raw add \
+    ssv_ramdisk_add \
         work/surrealra1n_apfs_sealvolume_wrapper \
         System/Library/Filesystems/apfs.fs/apfs_sealvolume
-    ./bin/hfsplus work/ramdisk.raw chmod \
+    ssv_ramdisk_chmod \
         100755 System/Library/Filesystems/apfs.fs/apfs_sealvolume
 
 }
 
+ssv_apply_dropbear_payload_metadata() {
+    local metadata=payloads/dropbear_sshd/payload-metadata.json
+    local rootfs_destination
+
+    [[ -f "$metadata" ]] || {
+        echo "[!] Dropbear payload metadata is missing."
+        return 1
+    }
+    if [[ -z "$SSV_RAMDISK_MOUNT" ]]; then
+        ssv_ramdisk_add \
+            payloads/dropbear_sshd/com.surrealra1n.install-dropbear.plist \
+            System/Library/LaunchDaemons/com.surrealra1n.install-dropbear.plist
+        ssv_ramdisk_chmod \
+            100644 System/Library/LaunchDaemons/com.surrealra1n.install-dropbear.plist
+        return 0
+    fi
+    rootfs_destination=$(ssv_ramdisk_mounted_path \
+        usr/local/share/surrealra1n_dropbear/rootfs)
+    sudo python3 modules/ssv/apply_payload_metadata.py apply \
+        "$metadata" "$rootfs_destination" "$SSV_RAMDISK_MOUNT" \
+        --source-root payloads/dropbear_sshd
+}
+
+ssv_verify_dropbear_payload_metadata() {
+    local metadata=payloads/dropbear_sshd/payload-metadata.json
+    local rootfs_destination
+
+    [[ $SSHD_DEV -eq 1 && -n "$SSV_RAMDISK_MOUNT" ]] || return 0
+    rootfs_destination=$(ssv_ramdisk_mounted_path \
+        usr/local/share/surrealra1n_dropbear/rootfs)
+    python3 modules/ssv/apply_payload_metadata.py verify \
+        "$metadata" "$rootfs_destination" "$SSV_RAMDISK_MOUNT"
+}
+
 ssv_install_restore_components() {
-    ssv_install_skip_setup
     ssv_install_dropbear
     ssv_install_seal_probes
+    ssv_verify_dropbear_payload_metadata
 }
 
 ssv_prepare_restore_ramdisk() {
@@ -1074,44 +1325,32 @@ ssv_prepare_restore_ramdisk() {
     local alignment_bytes=$((16 * 1024 * 1024))
     local target_bytes
 
-    base_bytes=$(stat -f %z work/ramdisk.raw)
+    SSV_RAMDISK_IMAGE=${1:-$SSV_RAMDISK_IMAGE}
+    SSV_RAMDISK_FORMAT=$(ssv_detect_ramdisk_format "$SSV_RAMDISK_IMAGE")
+    if [[ $SSV_RAMDISK_FORMAT == unknown ]]; then
+        echo "[!] Unsupported restore ramdisk filesystem."
+        return 1
+    fi
+    base_bytes=$(stat -f %z "$SSV_RAMDISK_IMAGE")
     payload_bytes=$(du -sk payloads/dropbear_sshd/rootfs | awk '{print $1 * 1024}')
     target_bytes=$((base_bytes + payload_bytes + reserve_bytes))
     target_bytes=$((
         (target_bytes + alignment_bytes - 1) /
         alignment_bytes * alignment_bytes
     ))
-    echo "[*] Growing restore ramdisk to $target_bytes bytes for a $payload_bytes-byte SSH payload..."
-    ./bin/hfsplus work/ramdisk.raw grow "$target_bytes"
-}
-
-ssv_install_skip_setup() {
-    [[ $SKIP_SETUP_DEV -eq 1 ]] || return 0
-
-    local deployment_target
-    deployment_target=$(ssv_deployment_target)
-
-    echo "[*] Building the native restore-time SetupDone helper..."
-    xcrun --sdk iphoneos clang \
-        -arch arm64 \
-        -miphoneos-version-min="$deployment_target" \
-        -Os \
-        -Wl,-dead_strip \
-        payloads/skip_setup_dev/skip_setup_dev.c \
-        -o work/surrealra1n_skip_setup_dev
-    ./bin/ldid -S work/surrealra1n_skip_setup_dev
-
-    echo "[*] Installing the experimental Skip Setup launch daemon..."
-    ./bin/hfsplus work/ramdisk.raw add \
-        work/surrealra1n_skip_setup_dev \
-        usr/local/bin/surrealra1n_skip_setup_dev
-    ./bin/hfsplus work/ramdisk.raw chmod \
-        100755 usr/local/bin/surrealra1n_skip_setup_dev
-    ./bin/hfsplus work/ramdisk.raw add \
-        payloads/skip_setup_dev/com.surrealra1n.skip-setup-dev.plist \
-        System/Library/LaunchDaemons/com.surrealra1n.skip-setup-dev.plist
-    ./bin/hfsplus work/ramdisk.raw chmod \
-        100644 System/Library/LaunchDaemons/com.surrealra1n.skip-setup-dev.plist
+    echo "[*] Growing $SSV_RAMDISK_FORMAT restore ramdisk to $target_bytes bytes for a $payload_bytes-byte SSH payload..."
+    if [[ $SSV_RAMDISK_FORMAT == apfs ]]; then
+        if [[ $dist != 3 && $dist != 4 ]]; then
+            echo "[!] APFS restore ramdisk modifications require macOS."
+            return 1
+        fi
+        dd if=/dev/zero of="$SSV_RAMDISK_IMAGE" \
+            bs=1 count=0 seek="$target_bytes" 2>/dev/null
+        SSV_RAMDISK_TARGET_BYTES=$target_bytes
+    else
+        ./bin/hfsplus "$SSV_RAMDISK_IMAGE" grow "$target_bytes"
+        SSV_RAMDISK_TARGET_BYTES=0
+    fi
 }
 
 ssv_install_dropbear() {
@@ -1122,8 +1361,6 @@ ssv_install_dropbear() {
     local rootless_symbol
     local system_mount
     local payload_file
-    local executable_file
-    local executable_path
     local deployment_target
     local -a payload_codesign_args
 
@@ -1248,47 +1485,37 @@ PY
     ./bin/ldid -S work/surrealra1n_install_dropbear
 
     echo "[*] Embedding the persistent SSH payload in the restore ramdisk..."
-    ./bin/hfsplus work/ramdisk.raw mkdir usr/local/share
-    ./bin/hfsplus work/ramdisk.raw mkdir usr/local/share/surrealra1n_dropbear
-    ./bin/hfsplus work/ramdisk.raw mkdir usr/local/share/surrealra1n_dropbear/rootfs
-    ./bin/hfsplus work/ramdisk.raw addall \
+    ssv_ramdisk_mkdir usr/local/share
+    ssv_ramdisk_mkdir usr/local/share/surrealra1n_dropbear
+    ssv_ramdisk_mkdir usr/local/share/surrealra1n_dropbear/rootfs
+    ssv_ramdisk_addall \
         payloads/dropbear_sshd/rootfs \
         usr/local/share/surrealra1n_dropbear/rootfs
-    while IFS= read -r executable_file; do
-        executable_path=${executable_file#payloads/dropbear_sshd/rootfs/}
-        ./bin/hfsplus work/ramdisk.raw chmod \
-            100755 "usr/local/share/surrealra1n_dropbear/rootfs/$executable_path"
-    done < <(find payloads/dropbear_sshd/rootfs -type f -perm -111 -print)
-    ./bin/hfsplus work/ramdisk.raw add \
+    ssv_apply_dropbear_payload_metadata
+    ssv_ramdisk_add \
         work/launchd_cache_loader.patched \
         usr/local/share/surrealra1n_dropbear/launchd-cache-loader
-    ./bin/hfsplus work/ramdisk.raw chmod \
+    ssv_ramdisk_chmod \
         100755 usr/local/share/surrealra1n_dropbear/launchd-cache-loader
-    ./bin/hfsplus work/ramdisk.raw add \
+    ssv_ramdisk_add \
         work/launchd.plist.patched \
         usr/local/share/surrealra1n_dropbear/launchd.plist
-    ./bin/hfsplus work/ramdisk.raw chmod \
+    ssv_ramdisk_chmod \
         100644 usr/local/share/surrealra1n_dropbear/launchd.plist
-    ./bin/hfsplus work/ramdisk.raw add \
+    ssv_ramdisk_add \
         work/surreal_loader \
         usr/local/share/surrealra1n_dropbear/surreal-loader
-    ./bin/hfsplus work/ramdisk.raw chmod \
+    ssv_ramdisk_chmod \
         100755 usr/local/share/surrealra1n_dropbear/surreal-loader
-    ./bin/hfsplus work/ramdisk.raw add \
+    ssv_ramdisk_add \
         work/surrealra1n_install_dropbear \
         usr/local/bin/surrealra1n_install_dropbear
-    ./bin/hfsplus work/ramdisk.raw chmod \
+    ssv_ramdisk_chmod \
         100755 usr/local/bin/surrealra1n_install_dropbear
-    ./bin/hfsplus work/ramdisk.raw add \
-        payloads/dropbear_sshd/com.surrealra1n.install-dropbear.plist \
-        System/Library/LaunchDaemons/com.surrealra1n.install-dropbear.plist
-    ./bin/hfsplus work/ramdisk.raw chmod \
-        100644 System/Library/LaunchDaemons/com.surrealra1n.install-dropbear.plist
 }
 
 ssv_patch_restore_trustcache() {
-    if [[ $SKIP_SETUP_DEV -ne 1 && $SSHD_DEV -ne 1 ]] && \
-            ! ssv_requires_seal_sync; then
+    if [[ $SSHD_DEV -ne 1 ]] && ! ssv_requires_seal_sync; then
         return 0
     fi
 
@@ -1298,10 +1525,6 @@ ssv_patch_restore_trustcache() {
             -o work/trustcache.raw
     fi
 
-    if [[ $SKIP_SETUP_DEV -eq 1 ]]; then
-        ./bin/trustcache append \
-            work/trustcache.raw work/surrealra1n_skip_setup_dev
-    fi
     if [[ $SSHD_DEV -eq 1 ]]; then
         ./bin/trustcache append \
             work/trustcache.raw work/surrealra1n_install_dropbear
@@ -1323,6 +1546,7 @@ ssv_patch_restore_trustcache() {
 ssv_patch_static_trustcache() {
     local -a required_files=()
     local custom_file
+    local trustcache_version
     if [[ $SSHD_DEV -eq 1 ]]; then
         required_files+=("${SSHD_PAYLOAD_MACHO_FILES[@]}")
     fi
@@ -1337,7 +1561,13 @@ ssv_patch_static_trustcache() {
     ./bin/img4 \
         -i "tmp1/Firmware/$fs_dmg_name.trustcache" \
         -o work/rootfs-trustcache.raw
-    ./bin/trustcache create -v 1 \
+    trustcache_version=$(od -An -tu4 -N4 \
+        work/rootfs-trustcache.raw | xargs)
+    if [[ $trustcache_version != 1 && $trustcache_version != 2 ]]; then
+        echo "[!] Unsupported StaticTrustCache version: $trustcache_version"
+        return 1
+    fi
+    ./bin/trustcache create -v "$trustcache_version" \
         work/ssv-required-trustcache.raw "${required_files[@]}"
     python3 modules/ssv/normalize_trustcache.py \
         work/rootfs-trustcache.raw \

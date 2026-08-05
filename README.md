@@ -39,12 +39,8 @@ foundation that makes this fork possible.
 
 Forge currently adds or develops the following features:
 
-- **System Mods** — experimental modifications applied to the System Volume
-  through the **System Patches** menu, including:
-  - **Skip Setup** — an optional Setup Assistant modification, currently
-    available only for iOS 15+ because it is designed for SSV;
-  - **SSH / Dropbear** — an optional rootless Dropbear payload, currently
-    available only for iOS 15+ because it is designed for SSV.
+- **System Mods** — experimental SSV modifications for iOS 15 and iOS 16,
+  including **SSH Dropbear (iOS 15+)**.
 - **Custom Binpatcher** — configurable byte patches for binaries, with version
   selectors and safety checks.
 - **A12/A13 experiments** — restore, patching, and device-testing changes

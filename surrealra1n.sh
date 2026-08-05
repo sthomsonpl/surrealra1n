@@ -2,7 +2,7 @@
 PROJECT_NAME="Surrealra1nForge"
 PROJECT_REPOSITORY="https://github.com/sthomsonpl/Surrealra1nForge"
 EXPERIMENTAL_UPDATE_REPOSITORY="$PROJECT_REPOSITORY.git"
-CURRENT_VERSION="v1.0b2"
+CURRENT_VERSION="v1.1b2"
 
 if [ "$EUID" -eq 0 ]; then
   echo "ERROR: Do not run this script with sudo or as root."
@@ -494,6 +494,10 @@ elif [[ $dist == 3 ]]; then
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Darwin/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/hfsplus
     curl -L -o bin/zenity https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/zenity
+    # iboot patcher oops
+    curl -L -o ibootpatch.c https://gist.githubusercontent.com/pwnerblu/c759c0060b5167a411b3b3adfcd07572/raw/6fd046857165306c309ecfa7a2e7af2aeb995de3/patch.c
+    gcc ibootpatch.c -o bin/iBootPatch
+    rm -rf ibootpatch.c
     # from spironolactone oops
     curl -L -o bin/trustcache https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/trustcache
     curl -L -o bin/iBoot64Patcher2 https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/iBoot64Patcher_cryptic
@@ -505,7 +509,7 @@ elif [[ $dist == 3 ]]; then
     # install additional restored_external patcher (iPhone X only)
     curl -L -o bin/ipx_restored_patcher https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/arm64/ipx_restored_patcher
     # restored patcher for seprmvr64 A8+ restores, my fork of mineek's restored patcher but repurposed
-    curl -L -o main.c https://gist.githubusercontent.com/pwnerblu/d2adc5adee74a679704577ddd64508bf/raw/991a74e2bbbdebdb1dd2d49d82f0829e7553f02f/main.c
+    curl -L -o main.c https://gist.githubusercontent.com/pwnerblu/d2adc5adee74a679704577ddd64508bf/raw/d7b2626fdbf53ef0a2d5bbbbb50c40719315161b/main.c
     gcc main.c -o bin/restoredpatcher
     rm -rf main.c
     # install asr patcher for tethered restores
@@ -532,7 +536,7 @@ elif [[ $dist == 3 ]]; then
     # install Kernel64Patcher for tether booting iOS 13+
     curl -L -o bin/Kernel64Patcher https://github.com/edwin170/downr1n/raw/refs/heads/main/binaries/Darwin/Kernel64Patcher
     # fetch pwnerblu fork of Kernel64Patcher and iBootpatch2 for tether booting iOS 14.x on A12 device.
-    if [[ $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
+    if [[ $macos_ver == 12.* || $macos_ver == 13.* || $macos_ver == 14.* || $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
         git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
         cd Kernel64Patcher
         make
@@ -591,6 +595,10 @@ elif [[ $dist == 4 ]]; then
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Darwin/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/hfsplus
     curl -L -o bin/zenity https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/zenity
+    # iboot patcher oops
+    curl -L -o ibootpatch.c https://gist.githubusercontent.com/pwnerblu/c759c0060b5167a411b3b3adfcd07572/raw/6fd046857165306c309ecfa7a2e7af2aeb995de3/patch.c
+    gcc ibootpatch.c -o bin/iBootPatch
+    rm -rf ibootpatch.c
     # from spironolactone oops
     curl -L -o bin/trustcache https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/trustcache
     curl -L -o bin/iBoot64Patcher2 https://github.com/Orangera1n/spironolactone/raw/refs/heads/main/Darwin/iBoot64Patcher_cryptic
@@ -602,7 +610,7 @@ elif [[ $dist == 4 ]]; then
     # install additional restored_external patcher (iPhone X only)
     curl -L -o bin/ipx_restored_patcher https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/macos/ipx_restored_patcher
     # restored patcher for seprmvr64 A8+ restores, my fork of mineek's restored patcher but repurposed
-    curl -L -o main.c https://gist.githubusercontent.com/pwnerblu/d2adc5adee74a679704577ddd64508bf/raw/991a74e2bbbdebdb1dd2d49d82f0829e7553f02f/main.c
+    curl -L -o main.c https://gist.githubusercontent.com/pwnerblu/d2adc5adee74a679704577ddd64508bf/raw/d7b2626fdbf53ef0a2d5bbbbb50c40719315161b/main.c
     gcc main.c -o bin/restoredpatcher
     rm -rf main.c
     # install asr patcher for tethered restores
@@ -629,7 +637,7 @@ elif [[ $dist == 4 ]]; then
     # install Kernel64Patcher for tether booting iOS 13+
     curl -L -o bin/Kernel64Patcher https://github.com/edwin170/downr1n/raw/refs/heads/main/binaries/Darwin/Kernel64Patcher
     # fetch pwnerblu fork of Kernel64Patcher and iBootpatch2 for tether booting iOS 14.x on A12 device.
-    if [[ $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
+    if [[ $macos_ver == 12.* || $macos_ver == 13.* || $macos_ver == 14.* || $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
         git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
         cd Kernel64Patcher
         make
@@ -688,6 +696,10 @@ else
     curl -L -o bin/Kernel64Patcher2 https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Linux/Kernel64Patcher
     curl -L -o bin/hfsplus https://github.com/LukeZGD/Semaphorin/raw/refs/heads/main/Linux/hfsplus
     # sshpass
+    # iboot patcher oops
+    curl -L -o ibootpatch.c https://gist.githubusercontent.com/pwnerblu/c759c0060b5167a411b3b3adfcd07572/raw/6fd046857165306c309ecfa7a2e7af2aeb995de3/patch.c
+    gcc ibootpatch.c -o bin/iBootPatch
+    rm -rf ibootpatch.c
     curl -L -o bin/trustcache https://github.com/CRKatri/trustcache/releases/download/v2.0/trustcache_linux_x86_64
     # fetch pwnerblu fork of Kernel64Patcher and iBootpatch2 for tether booting iOS 14.x on A12 device.
     git clone https://github.com/pwnerblu/Kernel64Patcher --recursive
@@ -711,7 +723,7 @@ else
     # install additional restored_external patcher (iPhone X only)
     curl -L -o bin/ipx_restored_patcher https://github.com/LukeZGD/Legacy-iOS-Kit/raw/refs/heads/main/bin/linux/x86_64/ipx_restored_patcher
     # restored patcher for seprmvr64 A8+ restores, my fork of mineek's restored patcher but repurposed
-    curl -L -o main.c https://gist.githubusercontent.com/pwnerblu/d2adc5adee74a679704577ddd64508bf/raw/991a74e2bbbdebdb1dd2d49d82f0829e7553f02f/main.c
+    curl -L -o main.c https://gist.githubusercontent.com/pwnerblu/d2adc5adee74a679704577ddd64508bf/raw/d7b2626fdbf53ef0a2d5bbbbb50c40719315161b/main.c
     gcc main.c -o bin/restoredpatcher
     rm -rf main.c
     # install asr patcher for tethered restores
@@ -1253,7 +1265,7 @@ IBEC7="iBEC.$BOARDID.RELEASE.im4p"
 KERNEL10="kernelcache.release.$BOARDID2"
 
 INFO_TEXT="$PROJECT_NAME - $CURRENT_VERSION
-Tether Downgrader for some checkm8 64bit devices, iOS 7.0 - 15.8.5
+Tether Downgrader for some checkm8 64bit devices, iOS 7.0 - 16.6.1
 Personal fork focused primarily on experimental A12/A13 testing.
 Based on surrealra1n by PWNBlue. Use at your own risk, and expect bugs.
 
@@ -1803,6 +1815,12 @@ else
     dfu_helper
 fi
 
+if [[ $skip_blob_set == 1 ]]; then
+    use_skip_blob="--skip-blob"
+else
+    use_skip_blob=""
+fi
+
 pwn_device
 det_rsep_flag
 
@@ -1822,7 +1840,7 @@ if [[ $IDENTIFIER == iPhone7* || $IDENTIFIER == iPad5* || $IDENTIFIER == iPod7* 
             sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
                 ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
                 --sep $sep_path --sep-manifest $manifest_path \
-                --custom-latest $LATEST_VERSION \
+                --custom-latest $LATEST_VERSION $use_skip_blob \
                 $updatebb_flag $rsep_flag --rkrn work/kernel.im4p $IPSW_PATH
             EXIT_CODE=$?
             set -e
@@ -1847,7 +1865,7 @@ if [[ $IDENTIFIER == iPhone7* || $IDENTIFIER == iPad5* || $IDENTIFIER == iPod7* 
         sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
             ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
             --sep $sep_path --sep-manifest $manifest_path \
-            --custom-latest $LATEST_VERSION \
+            --custom-latest $LATEST_VERSION $use_skip_blob \
             $updatebb_flag --no-rsep $IPSW_PATH
         EXIT_CODE=$?
         set -e
@@ -1866,7 +1884,7 @@ elif [[ $IDENTIFIER == iPad4* || $IDENTIFIER == iPhone6* ]] && [[ $VERSION == 10
         sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
             ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
             --sep $sep_path --sep-manifest $manifest_path \
-            --custom-latest $LATEST_VERSION \
+            --custom-latest $LATEST_VERSION $use_skip_blob \
             $updatebb_flag --no-rsep $IPSW_PATH
         EXIT_CODE=$?
         set -e
@@ -1885,7 +1903,7 @@ elif [[ $IDENTIFIER == iPad5* ]] && [[ $VERSION == 11.* || $VERSION == 12.* ]]; 
         sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
             ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
             --sep $sep_path --sep-manifest $manifest_path \
-            --custom-latest $LATEST_VERSION \
+            --custom-latest $LATEST_VERSION $use_skip_blob \
             $updatebb_flag --no-rsep $IPSW_PATH
         EXIT_CODE=$?
         set -e
@@ -1903,7 +1921,7 @@ else
         sudo FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD=1 \
             ./futurerestore/futurerestore -t $SHSH_PATH --use-pwndfu \
             --latest-sep \
-            --custom-latest $LATEST_VERSION \
+            --custom-latest $LATEST_VERSION $use_skip_blob \
             $updatebb_flag --no-rsep $IPSW_PATH
         EXIT_CODE=$?
         set -e
@@ -1954,6 +1972,15 @@ elif [[ $untether_options == 2 ]]; then
     restore_untethered_opts
 elif [[ $untether_options == 3 ]]; then
     sep_checker
+    read -p "Would you like to enable skip-blob for this restore? (y/n): " skip_blob_det
+    if [[ $skip_blob_det == y || $skip_blob_det == Y ]]; then
+        echo "Enabling --skip-blob option for this restore."
+        echo "WARNING: This skips blob validation, ENSURE your SHSH is valid!"
+        sleep 5
+        skip_blob_set=1
+    else
+        skip_blob_set=0
+    fi
     restore_with_blobs
 elif [[ $untether_options == 4 ]]; then
     reset_restore_vars
@@ -1967,8 +1994,6 @@ fi
 
 make_custom_ipsw_ios16(){
 
-mkdir -p restorefiles
-mkdir -p restorefiles/$IDENTIFIER
 mkdir -p restorefiles/$IDENTIFIER/$VERSION
 unzip "$IPSW_PATH" -d tmp1
 unzip "$IPSW_PATH_LATEST" -d tmp2
@@ -2030,8 +2055,6 @@ rm -rf "work"
 
 make_custom_ipsw(){
 
-mkdir -p restorefiles
-mkdir -p restorefiles/$IDENTIFIER
 mkdir -p restorefiles/$IDENTIFIER/$VERSION
 unzip "$IPSW_PATH" -d tmp1
 unzip "$IPSW_PATH_LATEST" -d tmp2
@@ -2140,6 +2163,273 @@ rm -rf "work"
 
 }
 
+make_custom_ipsw_a12_ios16(){
+
+if [[ $dist == 3 || $dist == 4 ]]; then
+    echo "A12/A13 iOS 16 downgrade on macOS"
+else
+    echo "A12/A13 iOS 16 downgrade on Linux; detecting restore ramdisk filesystem"
+fi
+
+IBSS_KEY=$(grep "ibss-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
+rm -rf tmp1 tmp2 work
+mkdir -p restorefiles/$IDENTIFIER/$VERSION
+mkdir -p boot/$IDENTIFIER/$VERSION
+unzip "$IPSW_PATH" -d tmp1
+unzip "$IPSW_PATH_LATEST" -d tmp2
+mkdir -p work
+./bin/img4 -i tmp1/Firmware/dfu/$IBSS -o work/iBSS.raw -k $IBSS_KEY
+./bin/iBootPatch work/iBSS.raw boot/$IDENTIFIER/iBSS.patch
+./bin/iBootPatch work/iBSS.raw work/iBSS.patchboot 
+./bin/iBootpatch2 work/iBSS.patchboot boot/$IDENTIFIER/$VERSION/iBSS.boot
+./bin/img4 -i boot/$IDENTIFIER/iBSS.patch -o tmp2/Firmware/dfu/$IBEC -A -T ibec
+#
+if [[ $VERSION == 16.4* || $VERSION == 16.5* ]]; then
+    restore_ramdisk_dmg=$(find_dmg tmp1 largest 116000000)
+elif [[ $VERSION == 16.6* ]]; then
+    restore_ramdisk_dmg=$(find_dmg tmp1 largest 118000000)
+elif [[ $VERSION == 16.3* || $VERSION == 16.2* ]]; then
+    restore_ramdisk_dmg=$(find_dmg tmp1 largest 114000000)
+elif [[ $VERSION == 16.1.2 ]]; then
+    restore_ramdisk_dmg="tmp1/078-65071-114.dmg"
+elif [[ $VERSION == 16.1.1 ]]; then
+    restore_ramdisk_dmg="tmp1/078-65071-113.dmg"
+elif [[ $VERSION == 16.1 ]]; then
+    restore_ramdisk_dmg="tmp1/078-65071-107.dmg"
+else
+    restore_ramdisk_dmg=$(find_dmg tmp1 largest 148000000)
+fi
+./bin/img4 -i "$restore_ramdisk_dmg" -o work/ramdisk.dmg
+restore_ramdisk_format=$(ssv_detect_ramdisk_format work/ramdisk.dmg)
+if [[ $restore_ramdisk_format == unknown ]]; then
+    echo "[!] Unsupported restore ramdisk filesystem."
+    return 1
+fi
+if [[ $dist != 3 && $dist != 4 && $restore_ramdisk_format == apfs ]]; then
+    echo "[!] This IPSW uses an APFS restore ramdisk, which currently requires macOS."
+    return 1
+fi
+echo "[*] Detected $restore_ramdisk_format restore ramdisk."
+cryptex_os=$(find_dmg tmp1 largest 3000000000)
+cryptex_os_18=$(find_dmg_arm64e tmp2 largest 2100000000)
+cryptex_app=$(find_dmg tmp1 smallest)
+cryptex_app_18=$(find_dmg tmp2 smallest)
+restored="restored_external"
+if [[ $LATEST_VERSION == 18.* ]]; then
+    restore_ramdisk_dmg_18=$(find_dmg tmp2 largest 179000000)
+elif [[ $LATEST_VERSION == 26.* ]]; then
+    restore_ramdisk_dmg_18=$(find_dmg tmp2 largest 232784000)
+fi
+fs_dmg_18=$(find_dmg_arm64e tmp2 largest)
+fs_dmg=$(find_dmg tmp1 largest)
+fs_dmg_name=${fs_dmg##*/}
+fs_dmg_18_name=${fs_dmg_18##*/}
+ramdisk_dmg_name_18=${restore_ramdisk_dmg_18##*/}
+ramdisk_dmg_name=${restore_ramdisk_dmg##*/}
+cryptex_os_name=${cryptex_os##*/}
+cryptex_app_name=${cryptex_app##*/}
+cryptex_os_name_18=${cryptex_os_18##*/}
+cryptex_app_name_18=${cryptex_app_18##*/}
+if [[ $IDENTIFIER == iPhone12,8 || $IDENTIFIER == iPhone12,1 || $IDENTIFIER == iPhone11,8 || $IDENTIFIER == iPhone12,3 || $IDENTIFIER == iPhone11,2 || $IDENTIFIER == iPad11,1 ]]; then
+    IDENTITY="0"
+elif [[ $IDENTIFIER == iPhone11,4 || $IDENTIFIER == iPhone12,5 || $IDENTIFIER == iPad11,2 ]]; then
+    IDENTITY="1"
+elif [[ $IDENTIFIER == iPhone11,6 || $IDENTIFIER == iPad11,3 ]]; then
+    IDENTITY="2"
+elif [[ $IDENTIFIER == iPad11,4 ]]; then
+    IDENTITY="3"
+fi
+sudo KERNEL2="$KERNEL2" IDENTITY="$IDENTITY" python3 <<'PY'
+import os
+import plistlib
+
+with open("tmp2/BuildManifest.plist", "rb") as f:
+    plist = plistlib.load(f)
+
+identity = int(os.environ["IDENTITY"])
+
+plist["BuildIdentities"][identity]["Manifest"]["KernelCache"]["Info"]["Path"] = os.environ["KERNEL2"]
+
+with open("tmp2/BuildManifest.plist", "wb") as f:
+    plistlib.dump(plist, f)
+PY
+cp -v tmp1/Firmware/AOP/$AOP14 tmp2/Firmware/AOP/$AOP
+cp -v tmp1/Firmware/agx/$GFX tmp2/Firmware/agx/$GFX
+cp -v tmp1/Firmware/ane/$ANE tmp2/Firmware/ane/$ANE
+cp -v tmp1/Firmware/isp_bni/$ISP tmp2/Firmware/isp_bni/$ISP
+if [[ $IDENTIFIER == iPhone* ]]; then
+    cp -v tmp1/Firmware/$CALLAN tmp2/Firmware/$CALLAN
+    cp -v tmp1/Firmware/WirelessPower/$WIRELESS tmp2/Firmware/WirelessPower/$WIRELESS
+fi
+if [[ ($IDENTIFIER == iPhone11* || $IDENTIFIER == iPhone12*) &&
+      $IDENTIFIER != iPhone12,8 ]]; then
+    cp -v tmp1/Firmware/$HAPTICASSET tmp2/Firmware/$HAPTICASSET
+fi
+cp -v tmp1/Firmware/all_flash/$DEVICETREE tmp2/Firmware/all_flash/$DEVICETREE
+cp -v tmp1/Firmware/$IOFW tmp2/Firmware/$IOFW
+cp -v tmp1/Firmware/ave/$AVE tmp2/Firmware/ave/$AVE
+cp -v tmp1/Firmware/$fs_dmg_name.root_hash tmp2/Firmware/$fs_dmg_18_name.root_hash 
+cp -v tmp1/Firmware/$fs_dmg_name.mtree tmp2/Firmware/$fs_dmg_18_name.mtree 
+if [[ $VERSION == 13.* ]] && [[ $IDENTIFIER == iPhone12* ]]; then
+    echo "Using latest MTFW"
+elif [[ $IDENTIFIER == iPhone11,2 || $IDENTIFIER == iPhone11,4 || $IDENTIFIER == iPhone11,6 ]]; then
+    echo "Using latest MTFW"
+else
+    cp -v tmp1/Firmware/$MTFW tmp2/Firmware/$MTFW # copy MTFW for target iOS
+fi
+if [[ ($IDENTIFIER == iPhone12*) &&
+      $IDENTIFIER != iPhone12,8 ]]; then
+    cp -v tmp1/Firmware/$LEAPHAPTIC tmp2/Firmware/$LEAPHAPTIC
+    cp -v tmp1/Firmware/pmp/$PMP tmp2/Firmware/pmp/$PMP
+fi
+if [[ $IDENTIFIER == iPhone12* ]]; then
+    cp -v tmp1/Firmware/pmp/$PMP tmp2/Firmware/pmp/$PMP
+fi
+cp -v $fs_dmg $fs_dmg_18 # replace rootfs in the IPSW
+ssv_apply_custom_binpatches "$fs_dmg" "$fs_dmg_18"
+ssv_patch_custom_canonical_mtree \
+    "tmp2/Firmware/$fs_dmg_18_name.mtree"
+cp -v tmp1/Firmware/$fs_dmg_name.trustcache tmp2/Firmware/$fs_dmg_18_name.trustcache 
+cp -v tmp1/Firmware/$ramdisk_dmg_name.trustcache tmp2/Firmware/$ramdisk_dmg_name_18.trustcache
+# replace cryptex1 components with target cryptex (latest cryptex will not work on iOS 16)
+cp -v $cryptex_os $cryptex_os_18
+cp -v $cryptex_app $cryptex_app_18
+cp -v tmp1/Firmware/$cryptex_os_name.trustcache tmp2/Firmware/$cryptex_os_name_18.trustcache
+cp -v tmp1/Firmware/$cryptex_os_name.root_hash tmp2/Firmware/$cryptex_os_name_18.root_hash
+cp -v tmp1/Firmware/$cryptex_app_name.trustcache tmp2/Firmware/$cryptex_app_name_18.trustcache
+cp -v tmp1/Firmware/$cryptex_app_name.root_hash tmp2/Firmware/$cryptex_app_name_18.root_hash
+#
+./bin/img4tool -e tmp1/$KERNEL -o work/kernel.raw
+./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -e -o -we # patch cryptex1 validations
+rm -rf tmp2/$KERNEL
+./bin/img4 -i work/kernelboot.patch -o tmp2/$KERNEL2 -A -T krnl -J || true
+cp -v tmp1/$KERNEL tmp2/$KERNEL
+# ramdisk patching: use hdiutil on macOS, hfsplus on Linux
+if [[ $dist == 3 || $dist == 4 ]]; then
+    # macOS: use hdiutil to mount/modify the ramdisk DMG
+    SSV_RAMDISK_IMAGE=work/ramdisk.dmg
+    SSV_RAMDISK_MOUNT=""
+    SSV_RAMDISK_TARGET_BYTES=0
+    SSV_RAMDISK_FORMAT=$restore_ramdisk_format
+    if ssv_system_patches_are_active; then
+        ssv_prepare_restore_ramdisk "$SSV_RAMDISK_IMAGE"
+    fi
+    ssv_attach_restore_ramdisk work/ramdisk.dmg rdwork
+    restore_ramdisk_mount="$SSV_RAMDISK_MOUNT"
+    cp -v "$restore_ramdisk_mount/usr/sbin/asr" work/asr
+    ./bin/asr64_patcher work/asr work/asr_patched
+    ./bin/ldid -e work/asr > work/ents.plist
+    ./bin/ldid -Swork/ents.plist work/asr_patched
+    sudo rm -f "$restore_ramdisk_mount/usr/sbin/asr"
+    sudo cp -v work/asr_patched "$restore_ramdisk_mount/usr/sbin/asr"
+    sudo chown 0:0 "$restore_ramdisk_mount/usr/sbin/asr"
+    sudo chmod 755 "$restore_ramdisk_mount/usr/sbin/asr"
+    #
+    cp -v "$restore_ramdisk_mount/usr/lib/libimg4.dylib" work/libimg4.dylib
+    ./bin/libimg4_patcher work/libimg4.dylib work/libimg4.patch
+    ./bin/ldid -Swork/ents.plist work/libimg4.patch
+    sudo rm -f "$restore_ramdisk_mount/usr/lib/libimg4.dylib"
+    sudo cp -v work/libimg4.patch "$restore_ramdisk_mount/usr/lib/libimg4.dylib"
+    sudo chown 0:0 "$restore_ramdisk_mount/usr/lib/libimg4.dylib"
+    sudo chmod 755 "$restore_ramdisk_mount/usr/lib/libimg4.dylib"
+    # restored patch start
+    if [[ $VERSION == 16.4* || $VERSION == 16.5* || $VERSION == 16.6* ]]; then
+        ramdisk_ipsw_url="https://updates.cdn-apple.com/2023SpringFCS/fullrestores/032-68311/B777E36E-32B8-4DEF-91CE-9909B04FD22D/iPhone10,3,iPhone10,6_16.4_20E247_Restore.ipsw"
+        ramdisk_dmg="078-23800-379.dmg"
+    elif [[ $VERSION == 16.1* || $VERSION == 16.2* || $VERSION == 16.3* ]]; then
+        ramdisk_ipsw_url="https://updates.cdn-apple.com/2022FallFCS/fullrestores/012-92982/6DF106AB-8868-433F-8C3F-05D50785E81E/iPhone10,3,iPhone10,6_16.1_20B82_Restore.ipsw"
+        ramdisk_dmg="078-64668-109.dmg"
+    else
+        ramdisk_ipsw_url="https://updates.cdn-apple.com/2022FallFCS/fullrestores/012-65861/0A0400A0-2174-4D49-91B7-43FC9DE24272/iPhone10,3,iPhone10,6_16.0_20A362_Restore.ipsw"
+        ramdisk_dmg="098-08863-001.dmg"
+    fi
+    cd work
+    sudo ../bin/pzb -g $ramdisk_dmg $ramdisk_ipsw_url
+    cd ..
+    ./bin/img4 -i work/$ramdisk_dmg -o work/ramdisk2.dmg
+    hdiutil attach work/ramdisk2.dmg -mountpoint rdwork2
+    cp -v rdwork2/usr/local/bin/restored_external work/restored_external
+    hdiutil detach rdwork2
+    ./bin/restoredpatcher work/restored_external work/restored_patch -c # patch cryptex1 install validation
+    ./bin/ldid -e work/restored_external > work/ents.plist
+    ./bin/ldid -Swork/ents.plist work/restored_patch
+    sudo rm -f "$restore_ramdisk_mount/usr/local/bin/restored_external"
+    sudo cp -v work/restored_patch \
+        "$restore_ramdisk_mount/usr/local/bin/restored_external"
+    sudo chown 0:0 \
+        "$restore_ramdisk_mount/usr/local/bin/restored_external"
+    sudo chmod 755 "$restore_ramdisk_mount/usr/local/bin/restored_external"
+    if ssv_system_patches_are_active; then
+        ssv_install_restore_components
+    fi
+    ssv_detach_restore_ramdisk
+    if [[ $SSV_RAMDISK_FORMAT == apfs ]]; then
+        echo "[*] Verifying APFS restore ramdisk ownership after remount..."
+        ssv_attach_restore_ramdisk work/ramdisk.dmg rdwork
+        ssv_verify_dropbear_payload_metadata
+        ssv_detach_restore_ramdisk
+    fi
+    # restored end
+    ./bin/img4 -i tmp1/Firmware/$ramdisk_dmg_name.trustcache -o work/trustcache.raw
+    ./bin/trustcache append work/trustcache.raw work/restored_patch
+    ./bin/trustcache append work/trustcache.raw work/asr_patched
+    ./bin/trustcache append work/trustcache.raw work/libimg4.patch
+    ./bin/img4 -i work/trustcache.raw -o tmp2/Firmware/$ramdisk_dmg_name_18.trustcache -A -T rtsc
+    ssv_patch_restore_trustcache
+    ssv_patch_static_trustcache
+    # pack rdsk into im4p
+    ./bin/img4 -i work/ramdisk.dmg -o $restore_ramdisk_dmg_18 -A -T rdsk
+else
+    # Linux: use hfsplus CLI to extract/replace files in raw HFS+ image
+    mv work/ramdisk.dmg work/ramdisk.raw
+    ./bin/hfsplus work/ramdisk.raw extract usr/sbin/asr work/asr
+    ./bin/asr64_patcher work/asr work/asr_patched
+    ./bin/ldid -e work/asr > work/ents.plist
+    ./bin/ldid -Swork/ents.plist work/asr_patched
+    ./bin/hfsplus work/ramdisk.raw rm usr/sbin/asr 
+    ./bin/hfsplus work/ramdisk.raw add work/asr_patched usr/sbin/asr
+    ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/sbin/asr
+    #
+    ./bin/hfsplus work/ramdisk.raw extract usr/lib/libimg4.dylib work/libimg4.dylib
+    ./bin/libimg4_patcher work/libimg4.dylib work/libimg4.patch
+    ./bin/ldid -Swork/ents.plist work/libimg4.patch
+    ./bin/hfsplus work/ramdisk.raw rm usr/lib/libimg4.dylib 
+    ./bin/hfsplus work/ramdisk.raw add work/libimg4.patch usr/lib/libimg4.dylib
+    ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/lib/libimg4.dylib
+    # restored patch start (iOS 16.0.x on Linux uses the 16.0 ramdisk)
+    ramdisk_ipsw_url="https://updates.cdn-apple.com/2022FallFCS/fullrestores/012-65861/0A0400A0-2174-4D49-91B7-43FC9DE24272/iPhone10,3,iPhone10,6_16.0_20A362_Restore.ipsw"
+    ramdisk_dmg="098-08863-001.dmg"
+    cd work
+    sudo ../bin/pzb -g $ramdisk_dmg $ramdisk_ipsw_url
+    cd ..
+    ./bin/img4 -i work/$ramdisk_dmg -o work/ramdisk2.raw
+    ./bin/hfsplus work/ramdisk2.raw extract usr/local/bin/restored_external work/restored_external
+    ./bin/restoredpatcher work/restored_external work/restored_patch -c # patch cryptex1 install validation
+    ./bin/ldid -e work/restored_external > work/ents.plist
+    ./bin/ldid -Swork/ents.plist work/restored_patch
+    ./bin/hfsplus work/ramdisk.raw rm usr/local/bin/restored_external
+    ./bin/hfsplus work/ramdisk.raw add work/restored_patch usr/local/bin/restored_external
+    ./bin/hfsplus work/ramdisk.raw chmod 100755 usr/local/bin/restored_external
+    # restored end
+    ./bin/img4 -i tmp1/Firmware/$ramdisk_dmg_name.trustcache -o work/trustcache.raw
+    ./bin/trustcache append work/trustcache.raw work/restored_patch
+    ./bin/trustcache append work/trustcache.raw work/asr_patched
+    ./bin/trustcache append work/trustcache.raw work/libimg4.patch
+    ./bin/img4 -i work/trustcache.raw -o tmp2/Firmware/$ramdisk_dmg_name_18.trustcache -A -T rtsc
+    # pack rdsk into im4p
+    ./bin/img4 -i work/ramdisk.raw -o $restore_ramdisk_dmg_18 -A -T rdsk
+fi
+cd tmp2
+zip -0 -r "../$CUSTOM_IPSW_NAME" *
+cd ..
+rm -rf "tmp1"
+rm -rf "tmp2"
+mv -v "$CUSTOM_IPSW_NAME" "$restoredir/$CUSTOM_IPSW_NAME"
+ssv_finish_ipsw_build
+rm -rf "work"
+
+}
+
 make_custom_ipsw_a12_ios14(){
 
 IBSS_KEY=$(grep "ibss-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
@@ -2147,8 +2437,6 @@ rm -rf tmp1 tmp2 work
 mkdir -p restorefiles
 mkdir -p restorefiles/$IDENTIFIER
 mkdir -p restorefiles/$IDENTIFIER/$VERSION
-mkdir -p boot
-mkdir -p boot/$IDENTIFIER
 mkdir -p boot/$IDENTIFIER/$VERSION
 unzip "$IPSW_PATH" -d tmp1
 unzip "$IPSW_PATH_LATEST" -d tmp2
@@ -2306,7 +2594,7 @@ if [[ $VERSION == 14.* ]]; then
 elif [[ $VERSION == 13.* ]]; then
     ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -b13 -n # make booting take less time (added -b13 to hopefully fix haptics issue)
 else
-    ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -e -o -r -b15
+    ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -e -o -r -we
 fi
 ./bin/kerneldiff work/kernel.raw work/kernelboot.patch work/kernelboot.diff
 rm -rf tmp2/$KERNEL
@@ -2315,6 +2603,11 @@ rm -rf tmp2/$KERNEL
 ./bin/kerneldiff work/kernel.raw work/kernel.patch work/kernel.diff
 ./bin/img4 -i tmp1/$KERNEL -o tmp2/$KERNEL -T krnl -J -P work/kernel.diff || true
 ./bin/img4 -i $restore_ramdisk_dmg -o work/ramdisk.raw
+SSV_RAMDISK_IMAGE=work/ramdisk.raw
+SSV_RAMDISK_MOUNT=""
+SSV_RAMDISK_DEVICE=""
+SSV_RAMDISK_TARGET_BYTES=0
+SSV_RAMDISK_FORMAT=$(ssv_detect_ramdisk_format "$SSV_RAMDISK_IMAGE")
 ssv_prepare_restore_ramdisk
 ./bin/hfsplus work/ramdisk.raw extract usr/sbin/asr work/asr
 ./bin/asr64_patcher work/asr work/asr_patched
@@ -2491,8 +2784,6 @@ else
     ibootpatcher="iBoot64Patcher"
 fi
 rm -rf "$bootdir"
-mkdir -p boot
-mkdir -p boot/$IDENTIFIER
 mkdir -p boot/$IDENTIFIER/$VERSION
 if [[ $VERSION == 12.* || $VERSION == 13.* || $VERSION == 14.* || $VERSION == 15.* ]]; then
     unzip -j "$IPSW_PATH" "Firmware/*.dmg.trustcache" -d work
@@ -2765,10 +3056,10 @@ do_tethered_restore_a12_a13(){
 
 # fix issue on Linux
 if [[ $dist == 3 || $dist == 4 ]]; then
-    if [[ $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
+    if [[ $macos_ver == 12.* || $macos_ver == 13.* || $macos_ver == 14.* || $macos_ver == 15.* || $macos_ver == 26.* || $macos_ver == 27.* ]]; then
         echo ""
     else
-        echo "A12/A13 downgrades are only supported on macOS 15 and later."
+        echo "A12/A13 downgrades are only supported on macOS 12 and later."
         exit 1
     fi
 fi
@@ -2803,14 +3094,19 @@ if [[ $VERSION == 14.* || $VERSION == 15.* ]]; then
     echo "You cannot set a Passcode or use Touch ID because of BPR being enforced"
     if [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPad11* ]]; then
         echo "You will need to tether restore to 14.0 beta 4 first, activate the device, then tether restore to the desired version."
-    elif [[ $IDENTIFIER == iPhone12,8 ]]; then
-        echo "You will need to tether restore to iOS 13.4.1 - 13.7 first, activate the device (may have to activate via Finder/iTunes/Legacy iOS Kit), then tether restore to the desired version."
+    elif [[ $IDENTIFIER == iPhone12* ]]; then
+        echo "You will need to tether restore to iOS 13.4 - 13.7 first, activate the device (may have to activate via Finder/iTunes/Legacy iOS Kit), then tether restore to the desired version."
         echo "You may also stay on iOS 13 if desired more than iOS 14/15."
         echo "Haptic home button will not work."
     fi
     read -p "Press enter to continue"
-elif [[ $VERSION == 16.* || $VERSION == 17.* || $VERSION == 18.* || $VERSION == 26.* ]]; then
-    echo "iOS 16-26 A12/A13 downgrades are not supported at the moment"
+elif [[ $VERSION == 16.* ]]; then
+    echo "Haptic home button will not work."
+    echo "You cannot set a Passcode or use Touch ID because of BPR being enforced"
+    echo "Since iOS 16 should activate normally, there is so need to head to iOS 13.x or iOS 14.0 beta 4."
+    read -p "Press enter to continue"
+elif [[ $VERSION == 17.* || $VERSION == 18.* || $VERSION == 26.* ]]; then
+    echo "iOS 17-26 A12/A13 downgrades are not supported at the moment"
     exit 1
 elif [[ $VERSION == 13.* || $VERSION == 12.* ]] && [[ $IDENTIFIER == iPhone11* || $IDENTIFIER == iPad11* ]]; then
     echo "SEP is incompatible"
@@ -2852,7 +3148,7 @@ if [[ $dist == 1 || $dist == 2 || $dist == 5 ]]; then
     python3 bin/liter8ctl boot boot/$IDENTIFIER/iBSS.patch || true
     echo "If you see the error: No such device (it may have been disconnected)"
     echo "This error is normal on Linux as long as the Device enters iBSS recovery mode (screen Should remain blank but be detected as Recovery mode device)."
-elif [[ $macos_ver == 27.* || $macos_ver == 26.* || $macos_ver == 15.* ]]; then
+elif [[ $macos_ver == 27.* || $macos_ver == 26.* || $macos_ver == 15.* || $macos_ver == 14.* || $macos_ver == 13.* || $macos_ver == 12.* ]]; then
     python3 bin/liter8ctl boot boot/$IDENTIFIER/iBSS.patch || true
     echo "usbliter8ctl may error out."
     echo "The error may be normal as long as the Device enters iBSS recovery mode (screen Should remain blank but be detected as Recovery mode device)."
@@ -2872,7 +3168,32 @@ APNONCE=$(./bin/irecovery -q | grep "^NONC:" | cut -d ':' -f2 | xargs)
 ECID=$(./bin/irecovery -q | grep "^ECID:" | cut -d ':' -f2 | xargs)
 mkdir -p boot
 echo "$VERSION" > boot/$ECID.txt
-if [[ $IDENTIFIER == iPhone12,8 ]]; then
+if [[ $VERSION == 16.* ]]; then
+    IDEVICERESTORE_LOG="$restoredir/idevicerestore-last.log"
+    set +e
+    sudo LD_LIBRARY_PATH="lib" ./bin/idevicerestore -ey \
+        "$restoredir/$CUSTOM_IPSW_NAME" 2>&1 | tee "$IDEVICERESTORE_LOG"
+    EXIT_CODE=${PIPESTATUS[0]}
+    set -e
+    if ssv_requires_seal_sync && \
+            ssv_restore_log_has_seal_data "$IDEVICERESTORE_LOG" "$SSHD_DEV"; then
+        ssv_handle_restore_failure "$IDEVICERESTORE_LOG"
+        echo "[*] The IPSW is ready for sealed System restore pass 2/2."
+        exit 1
+    fi
+    if [[ $EXIT_CODE -eq 0 ]]; then
+        ssv_handle_restore_success
+        echo "Restore has finished! Read above if there are any errors"
+        exit 0
+    fi
+    ssv_handle_restore_failure "$IDEVICERESTORE_LOG"
+    if ssv_requires_seal_sync; then
+        echo "[!] idevicerestore did not expose the APFS seal data required for pass 2."
+        echo "[!] The IPSW was not modified; inspect $IDEVICERESTORE_LOG before retrying."
+    fi
+    echo "idevicerestore failed with exit code $EXIT_CODE"
+    exit 1
+elif [[ $IDENTIFIER == iPhone12,8 ]]; then
     sudo LD_LIBRARY_PATH="lib" ./bin/idevicerestore -ey $restoredir/custom.ipsw
     echo "Restore has finished! Read above if there are any errors"
     exit 0
@@ -2938,8 +3259,6 @@ elif [[ $VERSION == 8.* ]]; then
     grow_to="3200000000"
 fi
 
-mkdir -p noseprestore
-mkdir -p noseprestore/$IDENTIFIER
 mkdir -p noseprestore/$IDENTIFIER/$VERSION
 IBSS_KEY=$(grep "ibss-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
 IBEC_KEY=$(grep "ibec-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
@@ -3045,8 +3364,6 @@ IBEC_KEY=$(grep "ibec-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
 DTRE_KEY=$(grep "dtre-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
 KRNL_KEY=$(grep "krnl-$VERSION:" "$KEY_FILE" | cut -d':' -f2 | xargs)
 bootdir="boot/$IDENTIFIER/$VERSION"
-mkdir -p boot
-mkdir -p boot/$IDENTIFIER
 mkdir -p boot/$IDENTIFIER/$VERSION
 unzip -j "$IPSW_PATH" "Firmware/dfu/$IBSS_2" -d work
 unzip -j "$IPSW_PATH" "Firmware/dfu/$IBEC_2" -d work

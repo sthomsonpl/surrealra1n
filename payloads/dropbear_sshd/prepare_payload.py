@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -61,6 +62,7 @@ HERE = Path(__file__).resolve().parent
 CACHE = HERE / ".cache"
 OUTPUT = HERE / "rootfs"
 MANIFEST = HERE / "payload-manifest.txt"
+METADATA = HERE / "payload-metadata.json"
 ALPINE_HASH = (
     "$6$surrealra1n$93k/ZXbA1HZ/ly4DRE1WyJeQf4YvYl1.vH7qwrd1tzejr9BX"
     "DE6PXsownwLth8E.i/4KkmxkIRnn4RHWqwTEZ."
@@ -302,6 +304,42 @@ def copy_command(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def write_payload_metadata(root: Path) -> None:
+    entries: list[dict[str, object]] = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        mode = path.stat().st_mode
+        entries.append(
+            {
+                "path": relative,
+                "type": "directory" if path.is_dir() else "file",
+                "uid": 0,
+                "gid": 0,
+                "mode": "0755" if path.is_dir() or mode & 0o111 else "0644",
+            }
+        )
+    metadata = {
+        "schema_version": 1,
+        "rootfs": entries,
+        "ramdisk": [
+            {
+                "source": "com.surrealra1n.install-dropbear.plist",
+                "destination": (
+                    "System/Library/LaunchDaemons/"
+                    "com.surrealra1n.install-dropbear.plist"
+                ),
+                "uid": 0,
+                "gid": 0,
+                "mode": "0644",
+            }
+        ],
+    }
+    METADATA.write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> int:
     if shutil.which("dpkg-deb") is None or shutil.which("dpkg") is None:
         print("[!] dpkg and dpkg-deb are required to prepare the SSH payload.", file=sys.stderr)
@@ -492,8 +530,10 @@ def main() -> int:
         shutil.rmtree(OUTPUT, ignore_errors=True)
         shutil.copytree(extracted, OUTPUT, symlinks=True)
         MANIFEST.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+        write_payload_metadata(OUTPUT)
 
     print(f"[*] SSH payload is ready under {OUTPUT}")
+    print(f"[*] SSH payload metadata is ready at {METADATA}")
     return 0
 
 
