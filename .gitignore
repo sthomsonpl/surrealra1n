@@ -8,6 +8,7 @@ bin/*
 /iBootpatch2/
 /ibootpatch.c
 /Kernel64Patcher/
+/patchers/Kernel64Patcher/
 /libimg4_patcher/
 /lib/
 /main.c
@@ -40,3 +41,5 @@ __pycache__/
 !/custom_binpatcher/patches/template_patchfind.json
 restore_*.log
 payloads/dropbear_sshd/payload-metadata.json
+AGENTS.MD
+/research/

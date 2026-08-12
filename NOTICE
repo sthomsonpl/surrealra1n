@@ -4,5 +4,9 @@ Copyright 2026, sthomsonpl.
 Based on surrealra1n, Copyright 2025, pwnerblu.
 Original project: https://github.com/pwnerblu/surrealra1n
 
+patchers/restoredpatcher.c is derived from restored patchfinder work by
+mineekdev and pwnerblu:
+https://gist.github.com/pwnerblu/d2adc5adee74a679704577ddd64508bf
+
 This project is licensed under the Apache License, Version 2.0.
 See the LICENSE file for details.

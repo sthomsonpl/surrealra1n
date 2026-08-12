@@ -1,5 +1,10 @@
 #define _GNU_SOURCE
 
+/*
+ * arm64e iBoot property-callback patcher.
+ * iBoot-10151 support follows pwnerblu's a12-a13-ios17-early-POC.
+ */
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -170,6 +175,27 @@ static int has_iboot_6723(const uint8_t *buf, size_t len)
     return memmem(buf, len, "iBoot-6723.", strlen("iBoot-6723.")) != NULL;
 }
 
+static int has_iboot_8422(const uint8_t *buf, size_t len)
+{
+    return memmem(buf, len, "iBoot-8422.", strlen("iBoot-8422.")) != NULL;
+}
+
+static int has_iboot_8419(const uint8_t *buf, size_t len)
+{
+    return memmem(buf, len, "iBoot-8419.", strlen("iBoot-8419.")) != NULL;
+}
+
+static int has_iboot_10151(const uint8_t *buf, size_t len)
+{
+    return memmem(buf, len, "iBoot-10151.", strlen("iBoot-10151.")) != NULL;
+}
+
+static int uses_csec_property_callback(const uint8_t *buf, size_t len)
+{
+    return has_iboot_6723(buf, len) || has_iboot_8422(buf, len) ||
+           has_iboot_8419(buf, len) || has_iboot_10151(buf, len);
+}
+
 static int patch_ios14_property_callback(uint8_t *buf, size_t len)
 {
     /*
@@ -187,11 +213,11 @@ static int patch_ios14_property_callback(uint8_t *buf, size_t len)
     size_t return_mov = 0;
     size_t pos;
 
-    if (!has_iboot_6723(buf, len))
+    if (!uses_csec_property_callback(buf, len))
         return 1;
 
     if (find_unique_u32(buf, len, csec_movk, &anchor) != 0) {
-        printf("[-] expected exactly one iBoot 6723 CSEC anchor\n");
+        printf("[-] expected exactly one CSEC anchor\n");
         return -1;
     }
 
@@ -205,7 +231,7 @@ static int patch_ios14_property_callback(uint8_t *buf, size_t len)
         pos -= 4;
     }
     if (!prologue) {
-        printf("[-] validated iBoot 6723 PACIBSP prologue not found\n");
+        printf("[-] validated PACIBSP prologue not found\n");
         return -1;
     }
 
@@ -221,7 +247,7 @@ static int patch_ios14_property_callback(uint8_t *buf, size_t len)
         }
     }
     if (!retab) {
-        printf("[-] iBoot 6723 property callback RETAB not found\n");
+        printf("[-] property callback RETAB not found\n");
         return -1;
     }
 
@@ -235,13 +261,13 @@ static int patch_ios14_property_callback(uint8_t *buf, size_t len)
     }
     if (!return_mov ||
         !is_ldp_fp_lr_from_sp(read32(buf, return_mov + 4))) {
-        printf("[-] validated iBoot 6723 return epilogue not found\n");
+        printf("[-] validated return epilogue not found\n");
         return -1;
     }
 
-    printf("[+] iBoot 6723 CSEC anchor @ buf+0x%zx\n", anchor);
-    printf("[+] iBoot 6723 PAC function @ buf+0x%zx\n", prologue);
-    printf("[+] iBoot 6723 return patch @ buf+0x%zx\n", return_mov);
+    printf("[+] CSEC anchor @ buf+0x%zx\n", anchor);
+    printf("[+] PAC function @ buf+0x%zx\n", prologue);
+    printf("[+] return patch @ buf+0x%zx\n", return_mov);
     write32(buf, return_mov, MOV_X0_0);
     return 0;
 }
@@ -250,7 +276,7 @@ static int patch_iboot_signature_check(uint8_t *buf, size_t len)
 {
     int result;
 
-    if (has_iboot_6723(buf, len))
+    if (uses_csec_property_callback(buf, len))
         return patch_ios14_property_callback(buf, len);
 
     result = patch_ios15_property_callback(buf, len);

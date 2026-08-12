@@ -241,7 +241,8 @@ ssv_config_menu() {
 }
 
 ssv_set_custom_ipsw_name() {
-    if [[ $VERSION == 16.* ]] && ! ssv_system_patches_are_active; then
+    if [[ $VERSION == 16.* || $VERSION == 17.* ]] && \
+            ! ssv_system_patches_are_active; then
         CUSTOM_IPSW_NAME="custom.ipsw"
     else
         CUSTOM_IPSW_NAME="customssvpatched_${VERSION}_${IDENTIFIER}.ipsw"
@@ -255,7 +256,7 @@ ssv_system_patches_are_active() {
 }
 
 ssv_uses_idevicerestore() {
-    [[ $VERSION == 16.* ]]
+    [[ $VERSION == 16.* || $VERSION == 17.* ]]
 }
 
 ssv_restore_log_path() {
@@ -267,13 +268,17 @@ ssv_restore_log_path() {
 }
 
 ssv_build_custom_ipsw() {
-    if [[ $VERSION == 16.* ]]; then
+    if [[ $VERSION == 16.* || $VERSION == 17.* ]]; then
         if ssv_system_patches_are_active && \
                 [[ $dist != 3 && $dist != 4 ]]; then
-            echo "[!] iOS 16 System Mods currently require macOS."
+            echo "[!] iOS 16/17 System Mods currently require macOS."
             return 1
         fi
-        make_custom_ipsw_a12_ios16
+        if [[ $VERSION == 17.* ]]; then
+            make_custom_ipsw_a12_ios17
+        else
+            make_custom_ipsw_a12_ios16
+        fi
     else
         make_custom_ipsw_a12_ios14
     fi
@@ -289,7 +294,10 @@ ssv_current_ipsw_fingerprint() {
         "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" \
         "$SYSTEM_VOLUME_MODE" \
         "$SCRIPT_DIR/patchers/arm64e_iboot_patcher.c" \
+        "$SCRIPT_DIR/patchers/restoredpatcher.c" \
+        "$SCRIPT_DIR/surrealra1n.sh" \
         "$SCRIPT_DIR/modules/ssv/main.sh" \
+        "$SCRIPT_DIR/modules/ssv/patch_devicetree.py" \
         "$SCRIPT_DIR/payloads/dropbear_sshd/mtree_wrapper.c" \
         "$SCRIPT_DIR/payloads/dropbear_sshd/apfs_sealvolume_wrapper.c" \
         "$SCRIPT_DIR/payloads/dropbear_sshd/prepare_payload.py" \
@@ -310,7 +318,10 @@ import sys
     patch_dir,
     volume_mode,
     arm64e_iboot_patcher_path,
+    restored_patcher_path,
+    main_pipeline_path,
     ssv_pipeline_path,
+    devicetree_patcher_path,
     mtree_wrapper_path,
     apfs_sealvolume_wrapper_path,
     payload_prepare_path,
@@ -335,6 +346,12 @@ if custom_active == "1":
 with open(arm64e_iboot_patcher_path, "rb") as source:
     arm64e_iboot_patcher_hash = hashlib.sha256(source.read()).hexdigest()
 
+with open(restored_patcher_path, "rb") as source:
+    restored_patcher_hash = hashlib.sha256(source.read()).hexdigest()
+
+with open(main_pipeline_path, "rb") as source:
+    main_pipeline_hash = hashlib.sha256(source.read()).hexdigest()
+
 ssv_source_hashes = {}
 for path in (
     mtree_wrapper_path,
@@ -350,6 +367,9 @@ for path in (
 with open(ssv_pipeline_path, "rb") as source:
     ssv_pipeline_hash = hashlib.sha256(source.read()).hexdigest()
 
+with open(devicetree_patcher_path, "rb") as source:
+    devicetree_patcher_hash = hashlib.sha256(source.read()).hexdigest()
+
 state = {
     "identifier": identifier,
     "ios": ios,
@@ -361,6 +381,10 @@ state = {
     "ssv_pipeline": ssv_pipeline_hash,
     "ssv_sources": ssv_source_hashes,
 }
+if ios.startswith("17."):
+    state["restored_patcher"] = restored_patcher_hash
+    state["ios17_pipeline"] = main_pipeline_hash
+    state["ios17_devicetree_patcher"] = devicetree_patcher_hash
 serialized = json.dumps(
     state, sort_keys=True, separators=(",", ":"), ensure_ascii=True
 ).encode()
