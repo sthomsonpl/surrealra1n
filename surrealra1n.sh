@@ -2336,7 +2336,7 @@ fi
 cp -v $fs_dmg $fs_dmg_18 # replace rootfs in the IPSW
 ssv_apply_custom_binpatches "$fs_dmg" "$fs_dmg_18"
 ssv_patch_custom_canonical_mtree \
-    "tmp2/Firmware/$fs_dmg_18_name.mtree"
+    "tmp2/Firmware/$fs_dmg_18_name.mtree" "$fs_dmg_18"
 cp -v tmp1/Firmware/$fs_dmg_name.trustcache tmp2/Firmware/$fs_dmg_18_name.trustcache 
 cp -v tmp1/Firmware/$ramdisk_dmg_name.trustcache tmp2/Firmware/$ramdisk_dmg_name_18.trustcache
 # replace cryptex1 components with target cryptex (latest cryptex will not work on iOS 16)
@@ -2773,7 +2773,7 @@ fi
 cp -v $fs_dmg $fs_dmg_18 # replace rootfs in the IPSW
 ssv_apply_custom_binpatches "$fs_dmg" "$fs_dmg_18"
 ssv_patch_custom_canonical_mtree \
-    "tmp2/Firmware/$fs_dmg_18_name.mtree"
+    "tmp2/Firmware/$fs_dmg_18_name.mtree" "$fs_dmg_18"
 cp -v tmp1/Firmware/$fs_dmg_name.trustcache tmp2/Firmware/$fs_dmg_18_name.trustcache 
 cp -v tmp1/Firmware/$ramdisk_dmg_name.trustcache tmp2/Firmware/$ramdisk_dmg_name_18.trustcache
 ./bin/img4 -i tmp1/$KERNEL -o work/kernel.raw

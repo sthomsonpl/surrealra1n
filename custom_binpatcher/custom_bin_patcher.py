@@ -4,8 +4,10 @@
 import argparse
 import fnmatch
 import glob
+import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -18,11 +20,20 @@ DEFAULT_SIGN_TOOL = os.path.join(os.path.dirname(SCRIPT_DIR), "bin", "ldid")
 DEFAULT_PATCHFINDER_TOOL = os.path.join(
     os.path.dirname(SCRIPT_DIR), "bin", "custombin_patchfinder"
 )
+SSV_MODULE_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "modules", "ssv")
+if SSV_MODULE_DIR not in sys.path:
+    sys.path.insert(0, SSV_MODULE_DIR)
+
+from xattr_utils import get_xattr, list_xattrs, remove_xattr, set_xattr
+
+
 TEMPLATE_PATCHES = {
     "template_patch.json",
     "template_multi_target_patch.json",
     "template_patchfind.json",
 }
+UF_COMPRESSED = getattr(stat, "UF_COMPRESSED", 0x00000020)
+PROVENANCE_XATTR = "com.apple.provenance"
 
 
 def load_json(path):
@@ -511,6 +522,23 @@ def collect_groups(
     return groups
 
 
+def read_extended_metadata(path):
+    return {name: get_xattr(path, name) for name in list_xattrs(path)}
+
+
+def synchronize_extended_metadata(path, expected, allow_provenance=False):
+    for name in list_xattrs(path):
+        remove_xattr(path, name)
+    for name, value in expected.items():
+        set_xattr(path, name, value)
+    actual = read_extended_metadata(path)
+    if allow_provenance and not expected and set(actual) <= {PROVENANCE_XATTR}:
+        return actual
+    if actual != expected:
+        raise ValueError(f"extended attribute verification failed: {path}")
+    return actual
+
+
 def validate_groups(groups):
     for path, group in groups.items():
         if not os.path.isfile(path):
@@ -541,6 +569,16 @@ def validate_groups(groups):
                 )
         group["original"] = original
         group["stat"] = metadata
+        group["source_compressed"] = bool(
+            getattr(metadata, "st_flags", 0) & UF_COMPRESSED
+        )
+        group["source_xattrs"] = read_extended_metadata(path)
+        if group["source_compressed"] and group["source_xattrs"]:
+            names = ", ".join(sorted(group["source_xattrs"]))
+            raise ValueError(
+                f"compressed target exposes unsupported visible xattrs: "
+                f"{group['display']} ({names})"
+            )
 
 
 def write_backup(backup, original, metadata):
@@ -600,12 +638,6 @@ def sign_file(sign_tool, source, staged, directory):
                 pass
 
 
-def copy_extended_metadata(source, destination):
-    if hasattr(os, "listxattr"):
-        for name in os.listxattr(source):
-            os.setxattr(destination, name, os.getxattr(source, name))
-
-
 def stage_group(path, group, sign_tool):
     patched = bytearray(group["original"])
     for operation in group["operations"]:
@@ -622,14 +654,25 @@ def stage_group(path, group, sign_tool):
             file.flush()
             os.fsync(file.fileno())
         metadata = group["stat"]
+        expected_xattrs = (
+            {} if group["source_compressed"] else group["source_xattrs"]
+        )
         os.chmod(staged, metadata.st_mode & 0o7777)
         sign_file(sign_tool, path, staged, directory)
-        copy_extended_metadata(path, staged)
+        synchronize_extended_metadata(
+            staged, expected_xattrs, group["source_compressed"]
+        )
         os.chown(staged, metadata.st_uid, metadata.st_gid)
         os.chmod(staged, metadata.st_mode & 0o7777)
         os.utime(staged, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
         if hasattr(os, "chflags") and hasattr(metadata, "st_flags"):
-            os.chflags(staged, metadata.st_flags)
+            flags = metadata.st_flags
+            if group["source_compressed"]:
+                flags &= ~UF_COMPRESSED
+            os.chflags(staged, flags)
+        synchronize_extended_metadata(
+            staged, expected_xattrs, group["source_compressed"]
+        )
         return staged
     except Exception:
         try:
@@ -655,6 +698,13 @@ def apply_groups(groups, sign_tool, backup_dir=None):
             write_backup(backup, group["original"], group["stat"])
         for path, staged in staged_files.items():
             os.replace(staged, path)
+            expected_xattrs = (
+                {} if groups[path]["source_compressed"]
+                else groups[path]["source_xattrs"]
+            )
+            synchronize_extended_metadata(
+                path, expected_xattrs, groups[path]["source_compressed"]
+            )
             directory_fd = os.open(os.path.dirname(path), os.O_RDONLY)
             try:
                 os.fsync(directory_fd)
@@ -671,10 +721,49 @@ def apply_groups(groups, sign_tool, backup_dir=None):
 
 
 def write_metadata(path, groups):
-    metadata = [
-        {"target": group["target"], "inode": os.stat(target).st_ino}
-        for target, group in groups.items()
-    ]
+    metadata = []
+    for target, group in groups.items():
+        target_stat = os.stat(target)
+        xattrs = read_extended_metadata(target)
+        expected_xattrs = (
+            {} if group["source_compressed"] else group["source_xattrs"]
+        )
+        normalized_compressed_xattrs = (
+            group["source_compressed"]
+            and not expected_xattrs
+            and set(xattrs) <= {PROVENANCE_XATTR}
+        )
+        if xattrs != expected_xattrs and not normalized_compressed_xattrs:
+            raise ValueError(
+                f"post-replacement xattr verification failed: {group['display']}"
+            )
+        item = {
+            "target": group["target"],
+            "inode": target_stat.st_ino,
+            "compressed": bool(
+                getattr(target_stat, "st_flags", 0) & UF_COMPRESSED
+            ),
+            "xattrs": [
+                {
+                    "name": name,
+                    "sha256": hashlib.sha256(value).hexdigest(),
+                }
+                for name, value in sorted(xattrs.items())
+            ],
+        }
+        if group["source_compressed"]:
+            if item["compressed"] or set(xattrs) - {PROVENANCE_XATTR}:
+                raise ValueError(
+                    f"compressed target was not normalized: {group['display']}"
+                )
+            if xattrs:
+                item["canonical_xattrs"] = {
+                    "digest": "authapfs.0",
+                    "count": 1,
+                }
+            else:
+                item["canonical_xattrs"] = {"digest": "none.0", "count": 0}
+        metadata.append(item)
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
     fd, temporary = tempfile.mkstemp(
@@ -737,7 +826,8 @@ def parse_args():
     )
     parser.add_argument("--backup-dir", help="optional external backup directory")
     parser.add_argument(
-        "--metadata-output", help="write changed targets and inode numbers as JSON"
+        "--metadata-output",
+        help="write changed targets and canonical filesystem metadata as JSON",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="validate without changing files"

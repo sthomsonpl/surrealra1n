@@ -4,8 +4,10 @@ SSV_CONFIG_PATH=${SSV_CONFIG_PATH:-boot/ssv_config.json}
 SSV_PATCHED=0
 SSV_CONFIG_SSHD=0
 SSV_CONFIG_CUSTOM_BINPATCHES=0
+SSV_CONFIG_SETUP_FIX=0
 SSHD_DEV=0
 CUSTOM_BINPATCHES_DEV=0
+SETUP_FIX_DEV=0
 CUSTOM_BINPATCHER_DIR=${CUSTOM_BINPATCHER_DIR:-"$SCRIPT_DIR/custom_binpatcher"}
 CUSTOM_BINPATCHER_CONFIG=${CUSTOM_BINPATCHER_CONFIG:-"$CUSTOM_BINPATCHER_DIR/patches.json"}
 CUSTOM_BINPATCHER_PATCH_DIR=${CUSTOM_BINPATCHER_PATCH_DIR:-"$CUSTOM_BINPATCHER_DIR/patches"}
@@ -19,9 +21,11 @@ ssv_apply_config() {
     if [[ $SSV_PATCHED -eq 1 ]]; then
         SSHD_DEV=$SSV_CONFIG_SSHD
         CUSTOM_BINPATCHES_DEV=$SSV_CONFIG_CUSTOM_BINPATCHES
+        SETUP_FIX_DEV=$SSV_CONFIG_SETUP_FIX
     else
         SSHD_DEV=0
         CUSTOM_BINPATCHES_DEV=0
+        SETUP_FIX_DEV=0
     fi
 }
 
@@ -31,18 +35,20 @@ ssv_write_config() {
     mkdir -p "$config_directory"
     python3 - "$SSV_CONFIG_PATH" "$SSV_PATCHED" \
         "$SSV_CONFIG_SSHD" \
-        "$SSV_CONFIG_CUSTOM_BINPATCHES" <<'PY'
+        "$SSV_CONFIG_CUSTOM_BINPATCHES" \
+        "$SSV_CONFIG_SETUP_FIX" <<'PY'
 import json
 import os
 import sys
 
-path, patched, sshd, custom_binpatches = sys.argv[1:]
+path, patched, sshd, custom_binpatches, setup_fix = sys.argv[1:]
 config = {
     "schema_version": 1,
     "ssv_patched": patched == "1",
     "patches": {
         "dropbear_sshd": sshd == "1",
         "custom_binpatches": custom_binpatches == "1",
+        "setup_fix": setup_fix == "1",
     },
 }
 temporary = f"{path}.surrealra1n"
@@ -82,9 +88,11 @@ if not isinstance(patched, bool) or not isinstance(patches, dict):
 
 sshd = patches.get("dropbear_sshd")
 custom_binpatches = patches.get("custom_binpatches", False)
+setup_fix = patches.get("setup_fix", False)
 if (
     not isinstance(sshd, bool)
     or not isinstance(custom_binpatches, bool)
+    or not isinstance(setup_fix, bool)
 ):
     raise ValueError("invalid patch configuration")
 
@@ -92,7 +100,8 @@ print(
     int(patched),
     int(sshd),
     int(custom_binpatches),
-    int("skip_setup" in patches),
+    int(setup_fix),
+    int("skip_setup" in patches or "setup_fix" not in patches),
 )
 PY
     ); then
@@ -102,7 +111,8 @@ PY
     fi
 
     read -r SSV_PATCHED SSV_CONFIG_SSHD \
-        SSV_CONFIG_CUSTOM_BINPATCHES config_needs_migration <<< "$loaded_config"
+        SSV_CONFIG_CUSTOM_BINPATCHES SSV_CONFIG_SETUP_FIX \
+        config_needs_migration <<< "$loaded_config"
     ssv_apply_config
     if [[ $config_needs_migration -eq 1 ]]; then
         ssv_write_config
@@ -130,6 +140,12 @@ ssv_ios15_features_are_supported() {
     [[ $major -ge 15 && $SYSTEM_VOLUME_MODE == sealed ]]
 }
 
+ssv_setup_fix_is_supported() {
+    local major
+    major=$(ssv_ios_major) || return 1
+    [[ $major -ge 17 ]]
+}
+
 ssv_detect_system_volume_mode() {
     local ipsw_path="$1"
     python3 "$SCRIPT_DIR/modules/ssv/detect_system_volume.py" "$ipsw_path"
@@ -154,6 +170,13 @@ ssv_configure_runtime_for_volume() {
             echo "[*] SSH Dropbear is disabled for this restore."
         fi
         SSHD_DEV=0
+    fi
+    if ! ssv_setup_fix_is_supported; then
+        if [[ $SETUP_FIX_DEV -eq 1 ]]; then
+            echo "[!] Setup Bypass is available only for iOS 17+."
+            echo "[*] Setup Bypass is disabled for this restore."
+        fi
+        SETUP_FIX_DEV=0
     fi
 }
 
@@ -224,14 +247,24 @@ ssv_config_menu() {
         else
             echo "2. Custom Binpatches [OFF]"
         fi
-        echo "3. Custom Binpatches Configurator"
-        echo "4. Back"
-        read -p "Please input an option (1-4, or C): " ssv_config_option
+        if ssv_setup_fix_is_supported; then
+            if [[ $SSV_CONFIG_SETUP_FIX -eq 1 ]]; then
+                echo "3. Setup Bypass (iOS 17+) [ON]"
+            else
+                echo "3. Setup Bypass (iOS 17+) [OFF]"
+            fi
+        else
+            echo "3. Setup Bypass (iOS 17+) [UNAVAILABLE]"
+        fi
+        echo "4. Custom Binpatches Configurator"
+        echo "5. Back"
+        read -p "Please input an option (1-5, or C): " ssv_config_option
         case "$ssv_config_option" in
             1) ssv_toggle_ssh ;;
             2) ssv_toggle_custom_binpatches ;;
-            3|C|c) ssv_custom_binpatches_configurator ;;
-            4) return ;;
+            3) ssv_toggle_setup_fix ;;
+            4|C|c) ssv_custom_binpatches_configurator ;;
+            5) return ;;
             *)
                 echo "Invalid option."
                 read -p "Press enter to continue"
@@ -252,6 +285,7 @@ ssv_set_custom_ipsw_name() {
 
 ssv_system_patches_are_active() {
     [[ $SSHD_DEV -eq 1 ]] || \
+        [[ $SETUP_FIX_DEV -eq 1 ]] || \
         ssv_custom_binpatches_are_active
 }
 
@@ -290,7 +324,7 @@ ssv_current_ipsw_fingerprint() {
         custom_active=1
     fi
     python3 - "$IDENTIFIER" "$VERSION" "$BUILD" \
-        "$SSHD_DEV" "$custom_active" \
+        "$SSHD_DEV" "$SETUP_FIX_DEV" "$custom_active" \
         "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" \
         "$SYSTEM_VOLUME_MODE" \
         "$SCRIPT_DIR/patchers/arm64e_iboot_patcher.c" \
@@ -298,6 +332,12 @@ ssv_current_ipsw_fingerprint() {
         "$SCRIPT_DIR/surrealra1n.sh" \
         "$SCRIPT_DIR/modules/ssv/main.sh" \
         "$SCRIPT_DIR/modules/ssv/patch_devicetree.py" \
+        "$SCRIPT_DIR/custom_binpatcher/custom_bin_patcher.py" \
+        "$SCRIPT_DIR/modules/ssv/patch_custom_mtree.py" \
+        "$SCRIPT_DIR/modules/ssv/xattr_utils.py" \
+        "$SCRIPT_DIR/payloads/setup_fix/disabled.plist" \
+        "$SCRIPT_DIR/payloads/setup_fix/setup_fix.c" \
+        "$SCRIPT_DIR/payloads/setup_fix/com.surrealra1n.setup-fix.plist" \
         "$SCRIPT_DIR/payloads/dropbear_sshd/mtree_wrapper.c" \
         "$SCRIPT_DIR/payloads/dropbear_sshd/apfs_sealvolume_wrapper.c" \
         "$SCRIPT_DIR/payloads/dropbear_sshd/prepare_payload.py" \
@@ -313,6 +353,7 @@ import sys
     ios,
     build,
     sshd,
+    setup_fix,
     custom_active,
     config_path,
     patch_dir,
@@ -322,6 +363,12 @@ import sys
     main_pipeline_path,
     ssv_pipeline_path,
     devicetree_patcher_path,
+    custom_binpatcher_source_path,
+    custom_mtree_patcher_path,
+    xattr_utils_path,
+    setup_fix_plist_path,
+    setup_fix_source_path,
+    setup_fix_daemon_path,
     mtree_wrapper_path,
     apfs_sealvolume_wrapper_path,
     payload_prepare_path,
@@ -370,13 +417,39 @@ with open(ssv_pipeline_path, "rb") as source:
 with open(devicetree_patcher_path, "rb") as source:
     devicetree_patcher_hash = hashlib.sha256(source.read()).hexdigest()
 
+custom_binpatcher_hashes = {}
+for path in (
+    custom_binpatcher_source_path,
+    custom_mtree_patcher_path,
+    xattr_utils_path,
+):
+    with open(path, "rb") as source:
+        custom_binpatcher_hashes[os.path.basename(path)] = hashlib.sha256(
+            source.read()
+        ).hexdigest()
+
+setup_fix_hashes = {}
+for path in (
+    setup_fix_plist_path,
+    setup_fix_source_path,
+    setup_fix_daemon_path,
+):
+    with open(path, "rb") as source:
+        setup_fix_hashes[os.path.basename(path)] = hashlib.sha256(
+            source.read()
+        ).hexdigest()
+
 state = {
     "identifier": identifier,
     "ios": ios,
     "build": build,
     "system_volume_mode": volume_mode,
     "dropbear_sshd": sshd == "1",
+    "setup_fix": setup_fix_hashes if setup_fix == "1" else False,
     "custom_binpatches": enabled_definitions,
+    "custom_binpatcher_sources": (
+        custom_binpatcher_hashes if custom_active == "1" else False
+    ),
     "arm64e_iboot_patcher": arm64e_iboot_patcher_hash,
     "ssv_pipeline": ssv_pipeline_hash,
     "ssv_sources": ssv_source_hashes,
@@ -421,7 +494,7 @@ write_ssv_patch_profile() {
     fi
     mkdir -p "$profile_directory"
     python3 - "$profile_path" "$ECID" "$IDENTIFIER" "$VERSION" \
-        "$SSHD_DEV" "$custom_binpatches" \
+        "$SSHD_DEV" "$SETUP_FIX_DEV" "$custom_binpatches" \
         "$CUSTOM_BINPATCHER_CONFIG" "$SYSTEM_VOLUME_MODE" <<'PY'
 import json
 import os
@@ -433,11 +506,13 @@ import sys
     identifier,
     version,
     sshd,
+    setup_fix,
     custom_binpatches,
     custom_config_path,
     volume_mode,
 ) = sys.argv[1:]
 loader_enabled = sshd == "1"
+setup_fix_enabled = setup_fix == "1"
 custom_enabled = custom_binpatches == "1"
 custom_patch_ids = []
 if custom_enabled:
@@ -447,8 +522,9 @@ if custom_enabled:
         patch_id for patch_id, enabled in custom_config.items() if enabled is True
     )
 patch_profile = {
-    "enabled": loader_enabled or custom_enabled,
+    "enabled": loader_enabled or setup_fix_enabled or custom_enabled,
     "dropbear_sshd": loader_enabled,
+    "setup_fix": setup_fix_enabled,
     "custom_binpatches": {
         "enabled": custom_enabled,
         "patch_ids": custom_patch_ids,
@@ -736,7 +812,27 @@ ssv_toggle_custom_binpatches() {
         echo "[*] Custom Binpatches: ON"
         echo "[!] Sealed System Volumes on iOS 15+ require two restore attempts."
         echo "[*] Unsealed System Volumes are patched in a single restore."
-        echo "[!] Use option 3 to choose the individual patches."
+        echo "[!] Use option 4 to choose the individual patches."
+    fi
+    ssv_apply_config
+    ssv_write_config
+    read -p "Press enter to continue"
+}
+
+ssv_toggle_setup_fix() {
+    if ! ssv_setup_fix_is_supported; then
+        echo "[!] Setup Bypass is available only after selecting an iOS 17+ target."
+        read -p "Press enter to continue"
+        return
+    fi
+    if [[ $SSV_CONFIG_SETUP_FIX -eq 1 ]]; then
+        SSV_CONFIG_SETUP_FIX=0
+        echo "[*] Setup Bypass (iOS 17+): OFF"
+    else
+        SSV_CONFIG_SETUP_FIX=1
+        echo "[*] Setup Bypass (iOS 17+): ON"
+        echo "[*] Only the required launchd disabled-service entries are merged."
+        echo "[!] Activation and cellular service are not patched by this option."
     fi
     ssv_apply_config
     ssv_write_config
@@ -992,17 +1088,62 @@ PY
     echo "[*] Custom Binpatches applied to the target System image."
 )
 
-ssv_patch_custom_canonical_mtree() {
+ssv_verify_custom_binpatch_image() (
+    set -euo pipefail
+
+    local system_image="$1"
+    local mtree_path="$2"
+    local metadata="$3"
+    local attach_plist="$SCRIPT_DIR/work/custom-binpatcher-verify-mount.plist"
+    local system_mount=""
+
+    cleanup_custom_binpatch_verify_mount() {
+        if [[ -n "${system_mount:-}" ]]; then
+            hdiutil detach "$system_mount" >/dev/null 2>&1 || true
+        fi
+        rm -f "$attach_plist"
+    }
+    trap cleanup_custom_binpatch_verify_mount EXIT
+
+    hdiutil attach -readonly -nobrowse -noverify -owners on -plist \
+        "$system_image" > "$attach_plist"
+    system_mount=$(python3 - "$attach_plist" <<'PY'
+import os
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    description = plistlib.load(source)
+for entity in description.get("system-entities", []):
+    mount_point = entity.get("mount-point")
+    if mount_point and os.path.isdir(os.path.join(mount_point, "usr")):
+        print(mount_point)
+        break
+PY
+    )
+    if [[ -z "$system_mount" ]]; then
+        echo "[!] Could not mount the patched System image for verification."
+        return 1
+    fi
+
+    python3 modules/ssv/patch_custom_mtree.py \
+        "$mtree_path" "$metadata" --verify --system-root "$system_mount"
+)
+
+ssv_patch_custom_canonical_mtree() (
+    set -euo pipefail
+
     ssv_custom_binpatches_are_active || return 0
     [[ $SYSTEM_VOLUME_MODE == sealed ]] || return 0
 
     local mtree_path="$1"
+    local system_image="$2"
     local metadata="$SCRIPT_DIR/work/custom-binpatcher-metadata.json"
     local temp_dir="$SCRIPT_DIR/work/custom-binpatcher-mtree"
     local archive_format
     local payload_size
 
-    [[ -f "$mtree_path" && -f "$metadata" ]] || {
+    [[ -f "$mtree_path" && -f "$system_image" && -f "$metadata" ]] || {
         echo "[!] Custom Binpatcher mtree inputs are missing."
         return 1
     }
@@ -1058,9 +1199,12 @@ ssv_patch_custom_canonical_mtree() {
     fi
     python3 modules/ssv/patch_custom_mtree.py \
         "$temp_dir/verify/mtree.txt" "$metadata" --verify
+    echo "[*] Verifying patched System metadata after image conversion..."
+    ssv_verify_custom_binpatch_image \
+        "$system_image" "$temp_dir/verify/mtree.txt" "$metadata"
     mv "$temp_dir/mtree.patched.im4p" "$mtree_path"
-    echo "[*] Custom Binpatcher canonical mtree inodes synchronized."
-}
+    echo "[*] Custom Binpatcher canonical metadata synchronized."
+)
 
 SSV_RAMDISK_IMAGE=${SSV_RAMDISK_IMAGE:-work/ramdisk.raw}
 SSV_RAMDISK_MOUNT=${SSV_RAMDISK_MOUNT:-}
@@ -1333,6 +1477,7 @@ ssv_verify_dropbear_payload_metadata() {
 
 ssv_install_restore_components() {
     ssv_install_dropbear
+    ssv_install_setup_fix
     ssv_install_seal_probes
     ssv_verify_dropbear_payload_metadata
 }
@@ -1538,8 +1683,50 @@ PY
         100755 usr/local/bin/surrealra1n_install_dropbear
 }
 
+ssv_install_setup_fix() {
+    [[ $SETUP_FIX_DEV -eq 1 ]] || return 0
+    ssv_setup_fix_is_supported || {
+        echo "[!] Refusing to install Setup Bypass on iOS older than 17."
+        return 1
+    }
+
+    local deployment_target
+    deployment_target=$(ssv_deployment_target)
+
+    echo "[*] Building the iOS 17+ Setup Bypass helper..."
+    plutil -lint payloads/setup_fix/disabled.plist >/dev/null
+    plutil -lint \
+        payloads/setup_fix/com.surrealra1n.setup-fix.plist >/dev/null
+    xcrun --sdk iphoneos clang \
+        -arch arm64 \
+        -miphoneos-version-min="$deployment_target" \
+        -Os \
+        -Wl,-dead_strip \
+        -framework CoreFoundation \
+        payloads/setup_fix/setup_fix.c \
+        -o work/surrealra1n_setup_fix
+    ./bin/ldid -S work/surrealra1n_setup_fix
+
+    echo "[*] Embedding the Setup Bypass in the restore ramdisk..."
+    ssv_ramdisk_add \
+        work/surrealra1n_setup_fix \
+        usr/local/bin/surrealra1n_setup_fix
+    ssv_ramdisk_chmod 100755 usr/local/bin/surrealra1n_setup_fix
+    ssv_ramdisk_add \
+        payloads/setup_fix/disabled.plist \
+        usr/local/share/surrealra1n_setup_fix/disabled.plist
+    ssv_ramdisk_chmod \
+        100644 usr/local/share/surrealra1n_setup_fix/disabled.plist
+    ssv_ramdisk_add \
+        payloads/setup_fix/com.surrealra1n.setup-fix.plist \
+        System/Library/LaunchDaemons/com.surrealra1n.setup-fix.plist
+    ssv_ramdisk_chmod \
+        100644 System/Library/LaunchDaemons/com.surrealra1n.setup-fix.plist
+}
+
 ssv_patch_restore_trustcache() {
-    if [[ $SSHD_DEV -ne 1 ]] && ! ssv_requires_seal_sync; then
+    if [[ $SSHD_DEV -ne 1 && $SETUP_FIX_DEV -ne 1 ]] && \
+            ! ssv_requires_seal_sync; then
         return 0
     fi
 
@@ -1556,6 +1743,10 @@ ssv_patch_restore_trustcache() {
             work/trustcache.raw work/surrealra1n_mtree_wrapper
         ./bin/trustcache append \
             work/trustcache.raw "${SSHD_PAYLOAD_MACHO_FILES[@]}"
+    fi
+    if [[ $SETUP_FIX_DEV -eq 1 ]]; then
+        ./bin/trustcache append \
+            work/trustcache.raw work/surrealra1n_setup_fix
     fi
     if ssv_requires_seal_sync; then
         ./bin/trustcache append \

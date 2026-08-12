@@ -250,7 +250,9 @@ the same binary. The patcher groups them by resolved target and then:
 4. applies all replacements to an in-memory copy;
 5. signs the changed binary with `ldid`, preserving its entitlements;
 6. preserves permissions, owner, group, timestamps, flags, and extended
-   attributes;
+   attributes; APFS-compressed targets are expanded, stripped of unexpected
+   host xattrs, and normalized to either zero xattrs or the unavoidable
+   `com.apple.provenance` attribute in canonical metadata;
 7. creates a `.bak` backup if one does not already exist;
 8. atomically replaces the original binary.
 
@@ -274,7 +276,7 @@ Useful options:
 --sign-tool PATH       ldid-compatible signing tool
 --patchfinder-tool PATH custombin_patchfinder-compatible executable
 --backup-dir PATH      Store backups outside the System volume
---metadata-output PATH Write changed target paths and inode numbers
+--metadata-output PATH Write changed targets and canonical filesystem metadata
 --dry-run              Validate and report without changing files
 --list                 List available patches and their state
 ```
@@ -287,7 +289,7 @@ applies and signs the configured patches, updates StaticTrustCache,
 materializes the modified image, and rebuilds its ASR checksums.
 
 For a sealed System Volume, Surrealra1nForge also updates canonical mtree inode
-entries. The sealed workflow requires two restore attempts:
+and xattr entries. The sealed workflow requires two restore attempts:
 
 1. the first attempt captures the APFS seal hash and is expected to fail;
 2. start the restore again, keep the existing IPSW, and let Surrealra1nForge update
