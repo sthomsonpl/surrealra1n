@@ -325,10 +325,12 @@ ssv_current_ipsw_fingerprint() {
     fi
     python3 - "$IDENTIFIER" "$VERSION" "$BUILD" \
         "$SSHD_DEV" "$SETUP_FIX_DEV" "$custom_active" \
+        "$IOS17_MODE" \
         "$CUSTOM_BINPATCHER_CONFIG" "$CUSTOM_BINPATCHER_PATCH_DIR" \
         "$SYSTEM_VOLUME_MODE" \
         "$SCRIPT_DIR/patchers/arm64e_iboot_patcher.c" \
         "$SCRIPT_DIR/patchers/restoredpatcher.c" \
+        "$SCRIPT_DIR/bin/Kernel64Patcher3" \
         "$SCRIPT_DIR/surrealra1n.sh" \
         "$SCRIPT_DIR/modules/ssv/main.sh" \
         "$SCRIPT_DIR/modules/ssv/patch_devicetree.py" \
@@ -355,11 +357,13 @@ import sys
     sshd,
     setup_fix,
     custom_active,
+    ios17_mode,
     config_path,
     patch_dir,
     volume_mode,
     arm64e_iboot_patcher_path,
     restored_patcher_path,
+    kernel_patcher_path,
     main_pipeline_path,
     ssv_pipeline_path,
     devicetree_patcher_path,
@@ -395,6 +399,9 @@ with open(arm64e_iboot_patcher_path, "rb") as source:
 
 with open(restored_patcher_path, "rb") as source:
     restored_patcher_hash = hashlib.sha256(source.read()).hexdigest()
+
+with open(kernel_patcher_path, "rb") as source:
+    kernel_patcher_hash = hashlib.sha256(source.read()).hexdigest()
 
 with open(main_pipeline_path, "rb") as source:
     main_pipeline_hash = hashlib.sha256(source.read()).hexdigest()
@@ -455,6 +462,8 @@ state = {
     "ssv_sources": ssv_source_hashes,
 }
 if ios.startswith("17."):
+    state["ios17_mode"] = ios17_mode
+    state["kernel_patcher"] = kernel_patcher_hash
     state["restored_patcher"] = restored_patcher_hash
     state["ios17_pipeline"] = main_pipeline_hash
     state["ios17_devicetree_patcher"] = devicetree_patcher_hash
@@ -495,7 +504,8 @@ write_ssv_patch_profile() {
     mkdir -p "$profile_directory"
     python3 - "$profile_path" "$ECID" "$IDENTIFIER" "$VERSION" \
         "$SSHD_DEV" "$SETUP_FIX_DEV" "$custom_binpatches" \
-        "$CUSTOM_BINPATCHER_CONFIG" "$SYSTEM_VOLUME_MODE" <<'PY'
+        "$CUSTOM_BINPATCHER_CONFIG" "$SYSTEM_VOLUME_MODE" \
+        "$IOS17_MODE" <<'PY'
 import json
 import os
 import sys
@@ -510,6 +520,7 @@ import sys
     custom_binpatches,
     custom_config_path,
     volume_mode,
+    ios17_mode,
 ) = sys.argv[1:]
 loader_enabled = sshd == "1"
 setup_fix_enabled = setup_fix == "1"
@@ -536,6 +547,7 @@ profile = {
     "ecid": ecid,
     "identifier": identifier,
     "ios_version": version,
+    "ios17_mode": ios17_mode if version.startswith("17.") else None,
     "system_volume_mode": volume_mode,
     "system_patches": patch_profile,
     # Retained for compatibility with existing profile consumers.

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Apply validated iOS 17 profiles to an Apple flattened DeviceTree.
 
-The profiles follow pwnerblu's a12-a13-ios17-early-POC.  Boot uses the full
-POC patch set, while restore keeps stock ephemeral storage so Rose follows its
-normal updater path.  The parser and serializer live in Forge so IPSW builds
-do not download executable code.
+The legacy boot profile follows pwnerblu's a12-a13-ios17-early-POC.  The SEP
+compatibility and restore profiles keep stock ephemeral storage so normal boot
+and Rose avoid the POC-only storage path.  The parser and serializer live in
+Forge so IPSW builds do not download executable code.
 """
 
 from __future__ import annotations
@@ -152,6 +152,11 @@ PATCH_PROFILES = {
     "restore": (
         ("delete", "/defaults", "content-protect", None),
     ),
+    "sep-compat": (
+        ("delete", "/defaults", "content-protect", None),
+        ("set", "/product", "boot-ios-diagnostics", U32_ONE),
+        ("set", "/chosen", "disable-transport-rm", U32_ONE),
+    ),
 }
 
 
@@ -162,12 +167,12 @@ def verify(root: Node, profile: str) -> None:
         valid = prop is None if operation == "delete" else prop is not None and prop.value == value
         if not valid:
             raise ValueError(f"verification failed for {path}/{name}")
-    if profile == "restore":
+    if profile in ("restore", "sep-compat"):
         chosen = resolve(root, "/chosen")
         ephemeral = chosen.property("ephemeral-storage") if chosen else None
         if ephemeral is None or ephemeral.value != U32_ZERO:
             raise ValueError(
-                "restore profile requires stock /chosen/ephemeral-storage=0"
+                f"{profile} profile requires stock /chosen/ephemeral-storage=0"
             )
 
 

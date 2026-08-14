@@ -23,6 +23,7 @@ VERSION=""
 BUILD=""
 VERSION_LATEST=""
 outdated=""
+IOS17_MODE="sep-compat"
 
 set -euo pipefail
 
@@ -212,6 +213,13 @@ pick_file() {
     p=$($zenity --file-selection --title="$1" 2>/dev/null)
     if [[ -z "$p" ]]; then
         read -e -r -p "$1 - enter absolute path (blank to cancel): " p </dev/tty
+    fi
+    # Pasting a shell-quoted path from Finder/Terminal can leave the quote
+    # characters in the value read above.  They are not part of the filename.
+    if [[ ${#p} -ge 2 && ${p:0:1} == "'" && ${p: -1} == "'" ]]; then
+        p=${p:1:${#p}-2}
+    elif [[ ${#p} -ge 2 && ${p:0:1} == '"' && ${p: -1} == '"' ]]; then
+        p=${p:1:${#p}-2}
     fi
     echo "$p"
 }
@@ -1606,7 +1614,32 @@ reset_restore_vars() {
     VERSION=""
     BUILD=""
     VERSION_LATEST=""
+    IOS17_MODE="sep-compat"
     ssv_reset_options
+}
+
+ios17_print_mode_option() {
+    if [[ $IOS17_MODE == poc ]]; then
+        echo "6. iOS 17 Mode [LEGACY POC]"
+    else
+        echo "6. iOS 17 Mode [SEP REQUEST COMPATIBILITY]"
+    fi
+}
+
+ios17_toggle_mode() {
+    if [[ $VERSION != 17.0 || $BUILD != 21A329 ]]; then
+        echo "[!] Select the iOS 17.0 (21A329) target IPSW first."
+        read -p "Press enter to continue"
+        return
+    fi
+    if [[ $IOS17_MODE == poc ]]; then
+        IOS17_MODE="sep-compat"
+        echo "[*] iOS 17 Mode: SEP request compatibility (default)"
+    else
+        IOS17_MODE="poc"
+        echo "[*] iOS 17 Mode: legacy early POC"
+    fi
+    read -p "Press enter to continue"
 }
 
 sep_checker(){
@@ -2349,9 +2382,15 @@ cp -v tmp1/Firmware/$cryptex_app_name.root_hash tmp2/Firmware/$cryptex_app_name_
 #
 ./bin/img4tool -e tmp1/$KERNEL -o work/kernel.raw
 if [[ $A12_IOS_PROFILE == ios17 ]]; then
-    # Match pwnerblu's working iOS 17 POC: KernelCache uses the alternate
-    # KERNEL2 path and suppresses the newer AppleKeyStore operation failure.
-    ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -we -i -ue
+    if [[ $IOS17_MODE == poc ]]; then
+        # Preserve pwnerblu's early POC byte path as an explicit fallback.
+        ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -we -i -ue
+    else
+        # Default compatibility experiment keeps stock ephemeral storage and
+        # makes only the iOS-17-only SEP special-bag state query report absent.
+        ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch \
+            -we -ue --ssbrp
+    fi
 else
     ./bin/Kernel64Patcher3 work/kernel.raw work/kernelboot.patch -we
 fi
@@ -2363,13 +2402,19 @@ if [[ $A12_IOS_PROFILE == ios17 ]]; then
     ./bin/Kernel64Patcher3 work/kernel.raw work/kernel.patch -ue
     ./bin/img4 -i work/kernel.patch -o tmp2/$KERNEL -A -T krnl -J || true
 
-    # Normal boot needs the full four-property POC profile. Restore gets a
-    # separate rdtr with stock ephemeral-storage=0 so Rose does not enter its
-    # NeRD/ftab preflight path.
+    # The legacy POC keeps its full four-property boot profile. The default
+    # SEP compatibility profile retains stock ephemeral-storage=0. Restore
+    # always gets a separate rdtr with stock ephemeral storage for Rose.
     ./bin/img4 -i tmp1/Firmware/all_flash/$DEVICETREE \
         -o work/DeviceTree.raw
+    if [[ $IOS17_MODE == poc ]]; then
+        boot_devicetree_profile=boot
+    else
+        boot_devicetree_profile=sep-compat
+    fi
     python3 "$SCRIPT_DIR/modules/ssv/patch_devicetree.py" \
-        --profile boot work/DeviceTree.raw work/DeviceTree.boot.patch
+        --profile "$boot_devicetree_profile" \
+        work/DeviceTree.raw work/DeviceTree.boot.patch
     python3 "$SCRIPT_DIR/modules/ssv/patch_devicetree.py" \
         --profile restore work/DeviceTree.raw work/DeviceTree.restore.patch
     ./bin/img4 -i work/DeviceTree.boot.patch \
@@ -3296,6 +3341,11 @@ elif [[ $VERSION == 17.* ]]; then
     echo "[!] EXPERIMENTAL iOS 17 support. Only 17.0 (21A329) has a key/patch profile."
     echo "[!] The restore intentionally creates an UNENCRYPTED Data Volume."
     echo "[!] Passcode, Face ID/Touch ID and features requiring Data Protection will not work."
+    if [[ $IOS17_MODE == poc ]]; then
+        echo "[!] Mode: legacy early POC (ephemeral-storage=1 during normal boot)."
+    else
+        echo "[*] Mode: SEP request compatibility (--ssbrp, ephemeral-storage=0)."
+    fi
     echo "[*] First validation target: iPhone 11 Pro Max (iPhone12,5); no UART diagnostics."
     read -p "Press enter to accept the experimental restore and continue"
 elif [[ $VERSION == 18.* || $VERSION == 26.* ]]; then
@@ -3694,8 +3744,9 @@ echo "1. Select Target IPSW"
 echo "2. Select Base IPSW"
 echo "3. Start Restore"
 ssv_print_menu_options
-echo "6. Back"
-read -p "Please input an option (1-6): " tether_options
+ios17_print_mode_option
+echo "7. Back"
+read -p "Please input an option (1-7): " tether_options
 if [[ $tether_options == 1 ]]; then
     IPSW_PATH=$(pick_file "Select an IPSW file")
     if [[ -z "$IPSW_PATH" ]]; then
@@ -3748,6 +3799,9 @@ elif [[ $tether_options == 5 ]]; then
     ssv_select_menu_option "$tether_options"
     restore_tethered_opts
 elif [[ $tether_options == 6 ]]; then
+    ios17_toggle_mode
+    restore_tethered_opts
+elif [[ $tether_options == 7 ]]; then
     reset_restore_vars
     restore_utils
 else
