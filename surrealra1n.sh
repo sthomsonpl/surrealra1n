@@ -1626,9 +1626,22 @@ ios17_print_mode_option() {
     fi
 }
 
+ios17_version_supported() {
+    local version=${1:-}
+    local major="" minor="" patch="" remainder=""
+
+    IFS=. read -r major minor patch remainder <<< "$version"
+    patch=${patch:-0}
+    if [[ -n $remainder || $major != 17 ||
+          ! $minor =~ ^[0-9]+$ || ! $patch =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+    (( minor < 3 || (minor == 3 && patch <= 1) ))
+}
+
 ios17_toggle_mode() {
-    if [[ $VERSION != 17.0 || $BUILD != 21A329 ]]; then
-        echo "[!] Select the iOS 17.0 (21A329) target IPSW first."
+    if ! ios17_version_supported "$VERSION"; then
+        echo "[!] Select an iOS 17.0-17.3.1 target IPSW first."
         read -p "Press enter to continue"
         return
     fi
@@ -2179,13 +2192,13 @@ make_custom_ipsw_a12_ios16(){
 }
 
 make_custom_ipsw_a12_ios17(){
-    if [[ $VERSION != 17.0 || $BUILD != 21A329 ]]; then
+    if ! ios17_version_supported "$VERSION"; then
         echo "[!] Experimental iOS 17 routing is enabled, but the current"
-        echo "[!] key and patch profile supports only iOS 17.0 (21A329)."
+        echo "[!] key and patch profile supports only iOS 17.0-17.3.1."
         return 1
     fi
     if [[ $dist != 3 && $dist != 4 ]]; then
-        echo "[!] The iOS 17.0 restore ramdisk is APFS and currently requires macOS."
+        echo "[!] The iOS 17 restore ramdisk is APFS and currently requires macOS."
         return 1
     fi
     A12_IOS_PROFILE=ios17 make_custom_ipsw_a12_ios16_17_common
@@ -2194,8 +2207,8 @@ make_custom_ipsw_a12_ios17(){
 make_custom_ipsw_a12_ios16_17_common(){
 
 if [[ $A12_IOS_PROFILE == ios17 ]]; then
-    echo "[!] EXPERIMENTAL: A12/A13 iOS 17.0 downgrade on macOS"
-    echo "[*] First validation target: iPhone 11 Pro Max (iPhone12,5)."
+    echo "[!] EXPERIMENTAL: A12/A13 iOS 17.0-17.3.1 downgrade on macOS"
+    echo "[*] Target: iOS $VERSION ($BUILD) on $NAME."
 elif [[ $dist == 3 || $dist == 4 ]]; then
     echo "A12/A13 iOS 16 downgrade on macOS"
 else
@@ -3338,7 +3351,7 @@ elif [[ $VERSION == 16.* ]]; then
     echo "Since iOS 16 should activate normally, there is so need to head to iOS 13.x or iOS 14.0 beta 4."
     read -p "Press enter to continue"
 elif [[ $VERSION == 17.* ]]; then
-    echo "[!] EXPERIMENTAL iOS 17 support. Only 17.0 (21A329) has a key/patch profile."
+    echo "[!] EXPERIMENTAL iOS 17 support for versions 17.0-17.3.1."
     echo "[!] The restore intentionally creates an UNENCRYPTED Data Volume."
     echo "[!] Passcode, Face ID/Touch ID and features requiring Data Protection will not work."
     if [[ $IOS17_MODE == poc ]]; then
@@ -3346,7 +3359,7 @@ elif [[ $VERSION == 17.* ]]; then
     else
         echo "[*] Mode: SEP request compatibility (--ssbrp, ephemeral-storage=0)."
     fi
-    echo "[*] First validation target: iPhone 11 Pro Max (iPhone12,5); no UART diagnostics."
+    echo "[*] Target: $NAME, iOS $VERSION ($BUILD); device validation remains experimental."
     read -p "Press enter to accept the experimental restore and continue"
 elif [[ $VERSION == 18.* || $VERSION == 26.* ]]; then
     echo "iOS 18-26 A12/A13 downgrades are not supported at the moment"
